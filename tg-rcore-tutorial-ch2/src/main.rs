@@ -79,7 +79,7 @@ extern crate alloc;
 use buddy_system_allocator::LockedHeap;
 #[global_allocator]
 static HEAP_ALLOCATOR: LockedHeap<32> = LockedHeap::empty();
-static mut HEAP_SPACE: [u8; 0x400000] = [0; 0x400000];
+static mut HEAP_SPACE: [u8; 0x100000] = [0; 0x100000];
 
 mod tangram;
 mod gpu;
@@ -96,7 +96,15 @@ static mut FB_PTR: *mut u8 = core::ptr::null_mut();
 static mut FB_LEN: usize = 0;
 static mut GPU_WIDTH: u32 = 0;
 
-/// 内核主函数：初始化各子系统，然后以批处理方式依次运行所有用户程序。
+/// S 态内核主函数（批处理与特权环境初始化）
+///
+/// 本函数构建了批处理系统运行所需的核心环境设施，也是内核从物理启动跨入任务管理的基础。
+/// 核心考察点机制：
+/// 1. 动态内存与外设挂载：分配堆空间用于支持 VirtIOGpu 等外设初始化，探寻并建立基础显存。
+/// 2. 跨时空设备生命周期与全局解封：为了确保后续多个依次载入的用户态任务能够连续无缝调用图形设备操作显存，借助切片与裸指针的强制转换拆解所有权并下沉为静态指针。
+/// 3. 系统调用分发注册：完成系统模块中 IO 和 Process 等标准能力服务上下文挂载。
+/// 4. 批处理流转应用：解析预先打包至内核段区域的用户态 ELF 并依次恢复，同时为每个任务创建建立各自独立的用户栈与 LocalContext 寄存器还原状态。
+/// 5. 异常陷入流环：依靠特权切换死循环处理 U 态通过 ecall 抛出的环境请求（譬如我们的绘图系统调用）以及清理每轮载入残留的指令缓存 (`fence.i`)。
 extern "C" fn rust_main() -> ! {
     // 第一步：清零 BSS 段（未初始化的全局变量区域）
     unsafe { tg_linker::KernelLayout::locate().zero_bss() };
@@ -105,7 +113,7 @@ extern "C" fn rust_main() -> ! {
     unsafe {
         HEAP_ALLOCATOR.lock().init(
             core::ptr::addr_of_mut!(HEAP_SPACE).cast::<u8>() as usize,
-            0x400000,
+            0x100000,
         );
     }
 
@@ -188,7 +196,7 @@ extern "C" fn rust_main() -> ! {
                     }
                 }
                 // 其他异常（如非法指令、页错误等）：杀死应用
-                trap => log::error!("app{i} was killed because of {trap:?}"),
+                trap => log::error!("app{i} was killed because of {trap:?} at pc={:#x}", ctx.pc()),
             }
             // 清除指令缓存：因为下一个用户程序会被加载到相同的内存区域，
             // 需要确保 i-cache 中不会残留旧的指令
@@ -225,10 +233,13 @@ enum SyscallResult {
     Error(SyscallId),
 }
 
-/// 处理系统调用。
+/// U-Mode 异常求助与系统调用捕获总线
 ///
-/// 从用户上下文中提取系统调用 ID（a7 寄存器）和参数（a0-a5 寄存器），
-/// 分发到对应的处理函数，并将返回值写回 a0 寄存器。
+/// 当用户态程序触发内部异常或调用 `ecall` 期望调用 S-Mode 资源响应服务时，CPU 临时陷入特权管理流并切入此分发器。
+/// 此函数的运行目标在于严格保护内核态控制数据的情况下赋予用户态所需的安全访问：
+/// 1. **状态留存与请求剖析**：从保存在特权堆栈的用户恢复寄存器状态对象 `LocalContext` 内，抽取请求标识（`a7` 取 `Syscall id`）与业务参数（`a0`-`a5`）。
+/// 2. **特权降维操作与授权**：比如处理本章额外追加的 233 专属图形 Syscall 时，内核利用早先下放的强校验全局 GPU 控制句柄与指针组为其在幕后绘图而严防 U-Mode 将不符规的内存越权指派给 DMA。
+/// 3. **结果指派与返回重置**：调用相应受信任接口，处理结束后返回系统反馈放回 `a0` 作为成功或错误参数反馈。最后推进地址 `sepc`，恢复调用时 U 态指令留痕处用于后续程序重新推演流控。
 fn handle_syscall(ctx: &mut LocalContext) -> SyscallResult {
     use tg_syscall::{SyscallId as Id, SyscallResult as Ret};
 
