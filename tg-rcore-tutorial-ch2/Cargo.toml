@@ -1,16 +1,15 @@
 [package]
-name = "tg-rcore-tutorial-ch2"
-description = "Chapter 2 of rCore Tutorial: Batch processing system with privilege levels and trap handling."
-version = "0.4.8"
+name = "tg-rcore-tutorial-ch2-extended"
+description = "Chapter 2 of rCore Tutorial (Extended): Batch processing system with privilege levels alongside dynamically rendering Tangram OS in RISC-V S-mode via syscall."
+version = "0.0.1"
 edition = "2024"
-authors = ["YdrMaster <ydrml@hotmail.com>","Yifan Wang<w-yf22@mails.tsinghua.edu.cn>","Yu Chen <yuchen@tsinghua.edu.cn>"]
-repository = "https://github.com/rcore-os/tg-rcore-tutorial-ch2"
-homepage = "https://github.com/rcore-os/tg-rcore-tutorial-ch2/tree/test"
+authors = ["Guangye Zhao <zhaogy23@mails.tsinghua.edu.cn>"]
+repository = "https://github.com/Nullsire/tg-rcore-tutorial/tree/test/tg-rcore-tutorial-ch2"
 documentation = "https://docs.rs/tg-rcore-tutorial-ch2"
 license = "GPL-3.0"
 readme = "README.md"
-keywords = ["rcore", "tutorial", "no-std", "riscv", "batch-system"]
-categories = ["no-std", "embedded"]
+keywords = ["ai", "ai4ose", "kernel", "learning", "os"]
+categories = ["no-std", "embedded", "os"]
 exclude = [
     "tg-user/**",
 #    ".cargo/config.toml",

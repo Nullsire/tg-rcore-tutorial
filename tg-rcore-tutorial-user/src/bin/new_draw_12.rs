@@ -12,7 +12,7 @@ extern "C" fn main() -> i32 {
         core::arch::asm!("ecall", in("a7") 233, in("a0") 12); 
     }
     // 插入大运算量的 busy-loop 来构造肉眼可见的拼接演示延迟！(无需 sleep 系统调用)
-    for _ in 0..2000 { 
+    for _ in 0..2000000 { 
         core::hint::black_box(0); 
     }
     0
