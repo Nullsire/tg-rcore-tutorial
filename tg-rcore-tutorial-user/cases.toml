@@ -10,6 +10,19 @@ cases = [
     "08power_3",
     "09power_5",
     "10power_7",
+    "new_draw_00",
+    "new_draw_01",
+    "new_draw_02",
+    "new_draw_03",
+    "new_draw_04",
+    "new_draw_05",
+    "new_draw_06",
+    "new_draw_07",
+    "new_draw_08",
+    "new_draw_09",
+    "new_draw_10",
+    "new_draw_11",
+    "new_draw_12",
 ]
 
 [ch3]
