@@ -74,15 +74,75 @@ unsafe extern "C" fn _start() -> ! {
 
 // ========== 内核主函数 ==========
 
+extern crate alloc;
+
+use buddy_system_allocator::LockedHeap;
+#[global_allocator]
+static HEAP_ALLOCATOR: LockedHeap<32> = LockedHeap::empty();
+static mut HEAP_SPACE: [u8; 0x400000] = [0; 0x400000];
+
+mod tangram;
+mod gpu;
+
+use core::ptr::NonNull;
+use virtio_drivers::device::gpu::VirtIOGpu;
+use virtio_drivers::transport::mmio::{MmioTransport, VirtIOHeader};
+use virtio_drivers::transport::{DeviceType, Transport};
+use gpu::VirtioHal;
+
+// 保存全局 GPU 控制对象与显存帧缓冲区，绕过生命周期检测便于多批处理跨界共享
+static mut GPU_DEV: Option<VirtIOGpu<VirtioHal, MmioTransport>> = None;
+static mut FB_PTR: *mut u8 = core::ptr::null_mut();
+static mut FB_LEN: usize = 0;
+static mut GPU_WIDTH: u32 = 0;
+
 /// 内核主函数：初始化各子系统，然后以批处理方式依次运行所有用户程序。
 extern "C" fn rust_main() -> ! {
     // 第一步：清零 BSS 段（未初始化的全局变量区域）
     unsafe { tg_linker::KernelLayout::locate().zero_bss() };
 
+    // 初始化内核堆
+    unsafe {
+        HEAP_ALLOCATOR.lock().init(
+            core::ptr::addr_of_mut!(HEAP_SPACE).cast::<u8>() as usize,
+            0x400000,
+        );
+    }
+
     // 第二步：初始化控制台输出（使 print!/println! 可用）
     tg_console::init_console(&Console);
     tg_console::set_log_level(option_env!("LOG"));
     tg_console::test_log();
+
+    // 探测 GPU 并挂载与提取全局句柄
+    for addr in (0x1000_1000..=0x1000_8000).step_by(0x1000) {
+        if unsafe { core::ptr::read_volatile(addr as *const u32) } != 0x74726976 {
+            continue;
+        }
+        let header = NonNull::new(addr as *mut VirtIOHeader).unwrap();
+        if let Ok(transport) = unsafe { MmioTransport::new(header) } {
+            if transport.device_type() == DeviceType::GPU {
+                if let Ok(mut gpu) = VirtIOGpu::<VirtioHal, MmioTransport>::new(transport) {
+                    if let Ok((width, _height)) = gpu.resolution() {
+                        unsafe {
+                            let fb = gpu.setup_framebuffer().unwrap();
+                            let fb_ptr = fb.as_mut_ptr();
+                            let fb_len = fb.len();
+                            core::slice::from_raw_parts_mut(fb_ptr, fb_len).fill(255); // 抹为白幕                            
+                            let _ = gpu.flush();
+                            
+                            FB_PTR = fb_ptr;
+                            FB_LEN = fb_len;
+                            GPU_WIDTH = width;
+                            GPU_DEV = Some(gpu);
+                        }
+                        log::info!("GPU Initialized & Framebuffer created. Ready to serve users.");
+                    }
+                }
+                break;
+            }
+        }
+    }
 
     // 第三步：初始化系统调用处理（注册 IO 和 Process 的实现）
     tg_syscall::init_io(&SyscallContext);
@@ -171,6 +231,41 @@ enum SyscallResult {
 /// 分发到对应的处理函数，并将返回值写回 a0 寄存器。
 fn handle_syscall(ctx: &mut LocalContext) -> SyscallResult {
     use tg_syscall::{SyscallId as Id, SyscallResult as Ret};
+
+    let id_val = ctx.a(7); // 系统调用号
+
+    // 处理绘制七巧板子块的专属 syscall
+    if id_val == 233 {
+        let part_idx = ctx.a(0); // 期望渲染第几块
+        unsafe {
+            let gpu_ptr = core::ptr::addr_of_mut!(GPU_DEV);
+            if let Some(gpu) = (*gpu_ptr).as_mut() {
+                let fb = core::slice::from_raw_parts_mut(FB_PTR, FB_LEN);
+                let num_o = tangram::TANGRAM_O.len();
+                let num_s = tangram::TANGRAM_S.len();
+                
+                let mut valid = false;
+                if part_idx < num_o {
+                    let poly = &tangram::TANGRAM_O[part_idx];
+                    tangram::fill_polygon(poly.vertices, poly.color, fb, GPU_WIDTH);
+                    valid = true;
+                } else if part_idx < num_o + num_s {
+                    let s_idx = part_idx - num_o;
+                    let poly = &tangram::TANGRAM_S[s_idx];
+                    tangram::fill_polygon(poly.vertices, poly.color, fb, GPU_WIDTH);
+                    valid = true;
+                }
+                
+                if valid {
+                    let _ = gpu.flush(); // 通知 DMA 同步物理显存显示
+                }
+            }
+        }
+        
+        *ctx.a_mut(0) = 0; // 返回 0 表成功
+        ctx.move_next();   // 步进 sepc
+        return SyscallResult::Done;
+    }
 
     // a7 寄存器存放 syscall ID
     let id = ctx.a(7).into();
