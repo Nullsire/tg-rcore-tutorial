@@ -1,16 +1,15 @@
 [package]
-name = "tg-rcore-tutorial-ch4"
+name = "tg-rcore-tutorial-ch4-zgy"
 description = "Chapter 4 of rCore Tutorial: Address space management with SV39 virtual memory."
 version = "0.4.8"
 edition = "2024"
-authors = ["YdrMaster <ydrml@hotmail.com>","Yifan Wang<w-yf22@mails.tsinghua.edu.cn>","Yu Chen <yuchen@tsinghua.edu.cn>"]
-repository = "https://github.com/rcore-os/tg-rcore-tutorial-ch4"
-homepage = "https://github.com/rcore-os/tg-rcore-tutorial-ch4/tree/test"
+authors = ["Guangye Zhao <zhaogy23@mails.tsinghua.edu.cn>"]
+repository = "https://github.com/Nullsire/tg-rcore-tutorial/tree/test/tg-rcore-tutorial-ch3"
 documentation = "https://docs.rs/tg-rcore-tutorial-ch4"
 license = "GPL-3.0"
 readme = "README.md"
-keywords = ["rcore", "tutorial", "no-std", "riscv", "virtual-memory"]
-categories = ["no-std", "embedded"]
+keywords = ["ai", "ai4ose", "kernel", "learning", "os"]
+categories = ["no-std", "embedded", "os"]
 exclude = [
     "tg-user/**",
 #    ".cargo/config.toml",
