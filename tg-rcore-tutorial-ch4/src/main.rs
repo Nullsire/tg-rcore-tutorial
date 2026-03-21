@@ -52,13 +52,13 @@ use riscv::register::*;
 use stub::Sv39;
 use tg_console::log;
 // 异界传送门：解决跨地址空间上下文切换的核心组件
-use tg_kernel_context::{foreign::MultislotPortal, LocalContext};
+use tg_kernel_context::{LocalContext, foreign::MultislotPortal};
 // RISC-V64 使用真正的 Sv39 类型
 #[cfg(target_arch = "riscv64")]
 use tg_kernel_vm::page_table::Sv39;
 use tg_kernel_vm::{
-    page_table::{MmuMeta, VAddr, VmFlags, VmMeta, PPN, VPN},
     AddressSpace,
+    page_table::{MmuMeta, PPN, VAddr, VPN, VmFlags, VmMeta},
 };
 use tg_sbi;
 use tg_syscall::Caller;
@@ -321,8 +321,8 @@ fn kernel_space(
         log::info!("{region}");
         use tg_linker::KernelRegionTitle::*;
         let flags = match region.title {
-            Text => "X_RV",    // 代码段：可执行、可读
-            Rodata => "__RV",  // 只读数据段：只读
+            Text => "X_RV",        // 代码段：可执行、可读
+            Rodata => "__RV",      // 只读数据段：只读
             Data | Boot => "_WRV", // 数据段/启动段：可读写
         };
         let s = VAddr::<Sv39>::new(region.range.start);
@@ -366,13 +366,13 @@ fn kernel_space(
 /// 与前几章不同，本章的系统调用实现需要进行**地址翻译**：
 /// 用户传入的指针是虚拟地址，内核需要通过页表将其翻译为物理地址才能访问。
 mod impls {
-    use crate::{build_flags, Sv39, PROCESSES};
+    use crate::{PROCESSES, Sv39, build_flags};
     use alloc::alloc::alloc_zeroed;
     use core::{alloc::Layout, ptr::NonNull};
     use tg_console::log;
     use tg_kernel_vm::{
-        page_table::{MmuMeta, Pte, VAddr, VmFlags, PPN, VPN},
         PageManager,
+        page_table::{MmuMeta, PPN, Pte, VAddr, VPN, VmFlags},
     };
     use tg_syscall::*;
 
@@ -573,13 +573,7 @@ mod impls {
     /// - 使用 translate() 方法进行地址翻译和权限检查
     impl Trace for SyscallContext {
         #[inline]
-        fn trace(
-            &self,
-            caller: Caller,
-            trace_request: usize,
-            id: usize,
-            data: usize,
-        ) -> isize {
+        fn trace(&self, caller: Caller, trace_request: usize, id: usize, data: usize) -> isize {
             match trace_request {
                 0 => {
                     const READABLE: VmFlags<Sv39> = build_flags("U_RV");
@@ -609,7 +603,9 @@ mod impls {
                     }
                 }
                 2 => {
-                    let ptr = unsafe { PROCESSES.get_mut() }.get_mut(caller.entity).unwrap();
+                    let ptr = unsafe { PROCESSES.get_mut() }
+                        .get_mut(caller.entity)
+                        .unwrap();
                     if id < ptr.syscall_counts.len() {
                         ptr.syscall_counts[id] as isize
                     } else {
@@ -628,7 +624,7 @@ mod impls {
     impl Memory for SyscallContext {
         fn mmap(
             &self,
-            _caller: Caller,
+            caller: Caller,
             addr: usize,
             len: usize,
             prot: i32,
@@ -636,15 +632,60 @@ mod impls {
             _fd: i32,
             _offset: usize,
         ) -> isize {
-            tg_console::log::info!(
-                "mmap: addr = {addr:#x}, len = {len}, prot = {prot}, not implemented"
-            );
-            -1
+            if addr % 4096 != 0 || (prot & !0x7) != 0 || prot == 0 {
+                return -1;
+            }
+            let mut pte_flags: u8 = 0x11; // V_U
+            if (prot & 1) != 0 {
+                pte_flags |= 2;
+            } // R
+            if (prot & 2) != 0 {
+                pte_flags |= 4;
+            } // W
+            if (prot & 4) != 0 {
+                pte_flags |= 8;
+            } // X
+            let vm_flags = unsafe { VmFlags::from_raw(pte_flags as usize) };
+            let vpn_start = VPN::<Sv39>::new(addr >> 12);
+            let pages_needed = (len + 4095) / 4096;
+            let vpn_end = VPN::<Sv39>::new(vpn_start.val() + pages_needed);
+            let range = vpn_start..vpn_end;
+            let ptr = unsafe { PROCESSES.get_mut() }
+                .get_mut(caller.entity)
+                .unwrap();
+            for area in &ptr.address_space.areas {
+                if area.start < range.end && area.end > range.start {
+                    return -1;
+                }
+            }
+            ptr.address_space.map(range, &[], 0, vm_flags);
+            0
         }
 
-        fn munmap(&self, _caller: Caller, addr: usize, len: usize) -> isize {
-            tg_console::log::info!("munmap: addr = {addr:#x}, len = {len}, not implemented");
-            -1
+        fn munmap(&self, caller: Caller, addr: usize, len: usize) -> isize {
+            if addr % 4096 != 0 {
+                return -1;
+            }
+            let vpn_start = VPN::<Sv39>::new(addr >> 12);
+            let pages_needed = (len + 4095) / 4096;
+            let vpn_end = VPN::<Sv39>::new(vpn_start.val() + pages_needed);
+            let target_range = vpn_start..vpn_end;
+            let ptr = unsafe { PROCESSES.get_mut() }
+                .get_mut(caller.entity)
+                .unwrap();
+
+            let mut is_fully_mapped = false;
+            for area in &ptr.address_space.areas {
+                if target_range.start >= area.start && target_range.end <= area.end {
+                    is_fully_mapped = true;
+                    break;
+                }
+            }
+            if !is_fully_mapped {
+                return -1;
+            }
+            ptr.address_space.unmap(target_range);
+            0
         }
     }
 }
