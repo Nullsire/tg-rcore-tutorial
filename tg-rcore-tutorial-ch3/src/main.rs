@@ -64,7 +64,7 @@ const APP_CAPACITY: usize = 32;
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.entry")]
 unsafe extern "C" fn _start() -> ! {
-    const STACK_SIZE: usize = (APP_CAPACITY + 2) * 8192;
+    const STACK_SIZE: usize = (APP_CAPACITY + 2) * 8192 + APP_CAPACITY * 4096;
     #[unsafe(link_section = ".boot.stack")]
     static mut STACK: [u8; STACK_SIZE] = [0u8; STACK_SIZE];
 
@@ -78,6 +78,9 @@ unsafe extern "C" fn _start() -> ! {
 }
 
 // ========== 内核主函数 ==========
+
+/// 全局变量，记录当前正在运行的任务的控制块指针
+pub static mut CURRENT_TCB: *mut task::TaskControlBlock = core::ptr::null_mut();
 
 /// 内核主函数：初始化各子系统，然后以多道方式并发运行所有用户程序。
 ///
@@ -130,6 +133,11 @@ extern "C" fn rust_main() -> ! {
                 // 当 coop feature 启用时，跳过此步（协作式调度，不使用时钟中断）
                 #[cfg(not(feature = "coop"))]
                 tg_sbi::set_timer(time::read64() + 12500);
+
+                // 记录当前正在运行的任务
+                unsafe {
+                    CURRENT_TCB = tcb as *mut _;
+                }
 
                 // 切换到 U-mode 执行用户程序
                 // execute() 会恢复用户寄存器并执行 sret
@@ -273,12 +281,7 @@ mod impls {
     /// QEMU virt 平台的时钟频率为 12.5 MHz（10000/125 = 80 ns/tick）。
     impl Clock for SyscallContext {
         #[inline]
-        fn clock_gettime(
-            &self,
-            _caller: Caller,
-            clock_id: ClockId,
-            tp: usize,
-        ) -> isize {
+        fn clock_gettime(&self, _caller: Caller, clock_id: ClockId, tp: usize) -> isize {
             match clock_id {
                 ClockId::CLOCK_MONOTONIC => {
                     // 将 RISC-V time 寄存器的值转换为纳秒
@@ -303,15 +306,32 @@ mod impls {
     /// - 查询系统调用计数（trace_request=2）
     impl Trace for SyscallContext {
         #[inline]
-        fn trace(
-            &self,
-            _caller: Caller,
-            _trace_request: usize,
-            _id: usize,
-            _data: usize,
-        ) -> isize {
-            tg_console::log::info!("trace: not implemented");
-            -1
+        fn trace(&self, _caller: Caller, trace_request: usize, id: usize, data: usize) -> isize {
+            tg_console::log::info!("sys_trace request: {trace_request}, id: {id}, data: {data}");
+            match trace_request {
+                0 => {
+                    let id = id as *const u8;
+                    unsafe { *id as isize }
+                }
+                1 => {
+                    let id = id as *mut u8;
+                    unsafe {
+                        *id = data as u8;
+                    }
+                    0
+                }
+                2 => {
+                    if let Some(tcb) = unsafe { crate::CURRENT_TCB.as_mut() } {
+                        return if id < tcb.syscall_counts.len() {
+                            tcb.syscall_counts[id] as isize
+                        } else {
+                            0
+                        };
+                    }
+                    0
+                }
+                _ => -1,
+            }
         }
     }
 }

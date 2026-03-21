@@ -29,6 +29,8 @@ pub struct TaskControlBlock {
     ctx: LocalContext,
     /// 任务完成标志：true 表示已退出或被杀死
     pub finish: bool,
+    /// 系统调用次数统计，假设系统调用ID最大不超过 512
+    pub syscall_counts: [usize; 512],
     /// 用户栈：8 KiB（1024 个 usize = 1024 × 8 = 8192 字节）
     /// 每个任务拥有独立的栈空间，避免栈溢出影响其他任务
     stack: [usize; 1024],
@@ -54,6 +56,7 @@ impl TaskControlBlock {
     pub const ZERO: Self = Self {
         ctx: LocalContext::empty(),
         finish: false,
+        syscall_counts: [0; 512],
         stack: [0; 1024],
     };
 
@@ -65,6 +68,7 @@ impl TaskControlBlock {
     pub fn init(&mut self, entry: usize) {
         self.stack.fill(0);
         self.finish = false;
+        self.syscall_counts.fill(0);
         self.ctx = LocalContext::user(entry);
         // 栈从高地址向低地址增长，所以 sp 指向栈顶（数组末尾之后的地址）
         *self.ctx.sp_mut() = self.stack.as_ptr() as usize + core::mem::size_of_val(&self.stack);
@@ -88,7 +92,11 @@ impl TaskControlBlock {
         use SchedulingEvent as Event;
 
         // a7 寄存器存放 syscall ID
-        let id = self.ctx.a(7).into();
+        let id_val: usize = self.ctx.a(7);
+        if id_val < self.syscall_counts.len() {
+            self.syscall_counts[id_val] += 1;
+        }
+        let id = id_val.into();
         // a0-a5 寄存器存放系统调用参数
         let args = [
             self.ctx.a(0),
