@@ -247,7 +247,17 @@ extern "C" fn schedule() -> ! {
                 use tg_syscall::{SyscallId as Id, SyscallResult as Ret};
 
                 let ctx = &mut ctx.context;
-                let id: Id = ctx.a(7).into();
+                let syscall_id_val = ctx.a(7);
+                let id: Id = syscall_id_val.into();
+
+                unsafe {
+                    let counts = &mut PROCESSES.get_mut()[0].syscall_counts;
+                    if counts.len() <= syscall_id_val {
+                        counts.resize(syscall_id_val + 1, 0);
+                    }
+                    counts[syscall_id_val] += 1;
+                }
+
                 let args = [ctx.a(0), ctx.a(1), ctx.a(2), ctx.a(3), ctx.a(4), ctx.a(5)];
                 match tg_syscall::handle(Caller { entity: 0, flow: 0 }, id, args) {
                     Ret::Done(ret) => match id {
@@ -565,13 +575,49 @@ mod impls {
         #[inline]
         fn trace(
             &self,
-            _caller: Caller,
-            _trace_request: usize,
-            _id: usize,
-            _data: usize,
+            caller: Caller,
+            trace_request: usize,
+            id: usize,
+            data: usize,
         ) -> isize {
-            tg_console::log::info!("trace: not implemented");
-            -1
+            match trace_request {
+                0 => {
+                    const READABLE: VmFlags<Sv39> = build_flags("U_RV");
+                    if let Some(ptr) = unsafe { PROCESSES.get_mut() }
+                        .get_mut(caller.entity)
+                        .unwrap()
+                        .address_space
+                        .translate::<u8>(VAddr::new(id), READABLE)
+                    {
+                        unsafe { *ptr.as_ref() as isize }
+                    } else {
+                        -1
+                    }
+                }
+                1 => {
+                    const WRITABLE: VmFlags<Sv39> = build_flags("U_WV");
+                    if let Some(mut ptr) = unsafe { PROCESSES.get_mut() }
+                        .get_mut(caller.entity)
+                        .unwrap()
+                        .address_space
+                        .translate::<u8>(VAddr::new(id), WRITABLE)
+                    {
+                        unsafe { *ptr.as_mut() = data as u8 };
+                        0
+                    } else {
+                        -1
+                    }
+                }
+                2 => {
+                    let ptr = unsafe { PROCESSES.get_mut() }.get_mut(caller.entity).unwrap();
+                    if id < ptr.syscall_counts.len() {
+                        ptr.syscall_counts[id] as isize
+                    } else {
+                        0
+                    }
+                }
+                _ => -1,
+            }
         }
     }
 

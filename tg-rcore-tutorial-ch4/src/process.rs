@@ -49,6 +49,8 @@ pub struct Process {
     pub heap_bottom: usize,
     /// 当前程序 break 位置（堆顶）
     pub program_brk: usize,
+    /// 记录系统调用次数
+    pub syscall_counts: alloc::vec::Vec<usize>,
 }
 
 impl Process {
@@ -150,6 +152,7 @@ impl Process {
             address_space,
             heap_bottom,
             program_brk: heap_bottom,
+            syscall_counts: alloc::vec::Vec::new(),
         })
     }
 
