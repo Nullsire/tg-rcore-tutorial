@@ -52,7 +52,7 @@ extern crate alloc;
 use crate::{
     impls::{Console, Sv39Manager, SyscallContext},
     process::Process,
-    processor::{ProcManager, PROCESSOR},
+    processor::{PROCESSOR, ProcManager},
 };
 use alloc::{alloc::alloc, collections::BTreeMap};
 use core::{alloc::Layout, cell::UnsafeCell, ffi::CStr, mem::MaybeUninit};
@@ -65,8 +65,8 @@ use tg_kernel_context::foreign::MultislotPortal;
 #[cfg(target_arch = "riscv64")]
 use tg_kernel_vm::page_table::Sv39;
 use tg_kernel_vm::{
-    page_table::{MmuMeta, VAddr, VmFlags, VmMeta, PPN, VPN},
     AddressSpace,
+    page_table::{MmuMeta, PPN, VAddr, VPN, VmFlags, VmMeta},
 };
 use tg_sbi;
 use tg_syscall::Caller;
@@ -315,8 +315,8 @@ fn kernel_space(layout: tg_linker::KernelLayout, memory: usize, portal: usize) {
         log::info!("{region}");
         use tg_linker::KernelRegionTitle::*;
         let flags = match region.title {
-            Text => "X_RV",       // 代码段：可执行、可读
-            Rodata => "__RV",     // 只读数据：可读
+            Text => "X_RV",        // 代码段：可执行、可读
+            Rodata => "__RV",      // 只读数据：可读
             Data | Boot => "_WRV", // 数据段：可写、可读
         };
         let s = VAddr::<Sv39>::new(region.range.start);
@@ -365,14 +365,14 @@ fn map_portal(space: &AddressSpace<Sv39, Sv39Manager>) {
 /// 包括 IO、Process、Scheduling、Clock、Memory 等系统调用接口。
 mod impls {
     use crate::{
-        build_flags, process::Process as ProcStruct, processor::ProcManager, Sv39, APPS, PROCESSOR,
+        APPS, PROCESSOR, Sv39, build_flags, process::Process as ProcStruct, processor::ProcManager,
     };
     use alloc::alloc::alloc_zeroed;
     use core::{alloc::Layout, ptr::NonNull};
     use tg_console::log;
     use tg_kernel_vm::{
-        page_table::{MmuMeta, Pte, VAddr, VmFlags, PPN, VPN},
         PageManager,
+        page_table::{MmuMeta, PPN, Pte, VAddr, VPN, VmFlags},
     };
     use tg_syscall::*;
     use tg_task_manage::{PManager, ProcId};
@@ -644,13 +644,40 @@ mod impls {
         /// 无需复制父进程地址空间。
         ///
         /// TODO: 实现 spawn 系统调用（练习题）
-        fn spawn(&self, _caller: Caller, _path: usize, _count: usize) -> isize {
-            let current = PROCESSOR.get_mut().current().unwrap();
-            tg_console::log::info!(
-                "spawn: parent pid = {}, not implemented",
-                current.pid.get_usize()
-            );
-            -1
+        fn spawn(&self, _caller: Caller, path: usize, count: usize) -> isize {
+            const READABLE: VmFlags<Sv39> = build_flags("RV");
+            let processor: *mut PManager<ProcStruct, ProcManager> = PROCESSOR.get_mut() as *mut _;
+            let current = unsafe { (*processor).current().unwrap() };
+
+            let name = current
+                .address_space
+                .translate::<u8>(VAddr::new(path), READABLE)
+                .map(|ptr| unsafe {
+                    core::str::from_utf8_unchecked(core::slice::from_raw_parts(ptr.as_ptr(), count))
+                });
+
+            let name = match name {
+                Some(n) => n,
+                None => return -1,
+            };
+
+            let data = match APPS.get(name) {
+                Some(d) => d,
+                None => return -1,
+            };
+
+            let elf = match ElfFile::new(data) {
+                Ok(e) => e,
+                Err(_) => return -1,
+            };
+
+            if let Some(process) = ProcStruct::from_elf(elf) {
+                let pid = process.pid;
+                unsafe { (*processor).add(pid, process, current.pid) };
+                pid.get_usize() as isize
+            } else {
+                -1
+            }
         }
 
         /// sbrk 系统调用：调整进程堆空间大小
@@ -680,13 +707,12 @@ mod impls {
         ///
         /// TODO: 实现 set_priority 系统调用（练习题：stride 调度算法）
         fn set_priority(&self, _caller: Caller, prio: isize) -> isize {
+            if prio < 2 {
+                return -1;
+            }
             let current = PROCESSOR.get_mut().current().unwrap();
-            tg_console::log::info!(
-                "set_priority: pid = {}, prio = {}, not implemented",
-                current.pid.get_usize(),
-                prio
-            );
-            -1
+            current.priority = prio as usize;
+            prio
         }
     }
 
@@ -739,18 +765,58 @@ mod impls {
             _fd: i32,
             _offset: usize,
         ) -> isize {
-            tg_console::log::info!(
-                "mmap: addr = {addr:#x}, len = {len}, prot = {prot}, not implemented"
-            );
-            -1
+            if addr % 4096 != 0 || (prot & !0x7) != 0 || prot == 0 {
+                return -1;
+            }
+            let mut pte_flags: u8 = 0x11; // V_U
+            if (prot & 1) != 0 {
+                pte_flags |= 2;
+            } // R
+            if (prot & 2) != 0 {
+                pte_flags |= 4;
+            } // W
+            if (prot & 4) != 0 {
+                pte_flags |= 8;
+            } // X
+            let vm_flags = unsafe { VmFlags::from_raw(pte_flags as usize) };
+            let vpn_start = VPN::<Sv39>::new(addr >> 12);
+            let pages_needed = (len + 4095) / 4096;
+            let vpn_end = VPN::<Sv39>::new(vpn_start.val() + pages_needed);
+            let range = vpn_start..vpn_end;
+            let ptr = PROCESSOR.get_mut().current().unwrap();
+            for area in &ptr.address_space.areas {
+                if area.start < range.end && area.end > range.start {
+                    return -1;
+                }
+            }
+            ptr.address_space.map(range, &[], 0, vm_flags);
+            0
         }
 
         /// munmap 系统调用：取消内存映射
         ///
         /// TODO: 实现 munmap 系统调用（练习题）
         fn munmap(&self, _caller: Caller, addr: usize, len: usize) -> isize {
-            tg_console::log::info!("munmap: addr = {addr:#x}, len = {len}, not implemented");
-            -1
+            if addr % 4096 != 0 {
+                return -1;
+            }
+            let vpn_start = VPN::<Sv39>::new(addr >> 12);
+            let pages_needed = (len + 4095) / 4096;
+            let vpn_end = VPN::<Sv39>::new(vpn_start.val() + pages_needed);
+            let target_range = vpn_start..vpn_end;
+            let ptr = PROCESSOR.get_mut().current().unwrap();
+            let mut is_fully_mapped = false;
+            for area in &ptr.address_space.areas {
+                if target_range.start >= area.start && target_range.end <= area.end {
+                    is_fully_mapped = true;
+                    break;
+                }
+            }
+            if !is_fully_mapped {
+                return -1;
+            }
+            ptr.address_space.unmap(target_range);
+            0
         }
     }
 }

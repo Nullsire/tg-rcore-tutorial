@@ -109,6 +109,28 @@ impl Schedule<ProcId> for ProcManager {
 
     /// 从就绪队列头部取出下一个要执行的进程
     fn fetch(&mut self) -> Option<ProcId> {
-        self.ready_queue.pop_front()
+        if self.ready_queue.is_empty() {
+            return None;
+        }
+
+        let mut min_stride = usize::MAX;
+        let mut min_idx = 0;
+        for (idx, &id) in self.ready_queue.iter().enumerate() {
+            if let Some(task) = self.tasks.get(&id) {
+                if task.stride < min_stride {
+                    min_stride = task.stride;
+                    min_idx = idx;
+                }
+            }
+        }
+
+        let min_id = self.ready_queue.remove(min_idx).unwrap();
+        // 更新 stride
+        if let Some(task) = self.tasks.get_mut(&min_id) {
+            let pass = 255 / task.priority;
+            task.stride += pass;
+        }
+
+        Some(min_id)
     }
 }
