@@ -84,6 +84,16 @@ pub struct Process {
     pub mutex_list: Vec<Option<Arc<dyn MutexTrait>>>,
     /// 条件变量列表（**本章新增**，所有线程共享）
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// 是否开启死锁检测
+    pub is_deadlock_detect_enabled: bool,
+    /// 线程已分配的 mutex
+    pub mutex_allocations: alloc::collections::BTreeMap<usize, Vec<usize>>,
+    /// 线程已分配的 semaphore
+    pub sem_allocations: alloc::collections::BTreeMap<usize, Vec<usize>>,
+    /// 线程正在请求（等待）的 mutex
+    pub mutex_requests: alloc::collections::BTreeMap<usize, usize>,
+    /// 线程正在请求（等待）的 semaphore
+    pub sem_requests: alloc::collections::BTreeMap<usize, usize>,
 }
 
 impl Process {
@@ -134,6 +144,11 @@ impl Process {
                 semaphore_list: Vec::new(),
                 mutex_list: Vec::new(),
                 condvar_list: Vec::new(),
+                is_deadlock_detect_enabled: false,
+                mutex_allocations: alloc::collections::BTreeMap::new(),
+                sem_allocations: alloc::collections::BTreeMap::new(),
+                mutex_requests: alloc::collections::BTreeMap::new(),
+                sem_requests: alloc::collections::BTreeMap::new(),
             },
             thread,
         ))
@@ -206,6 +221,11 @@ impl Process {
                 semaphore_list: Vec::new(),
                 mutex_list: Vec::new(),
                 condvar_list: Vec::new(),
+                is_deadlock_detect_enabled: false,
+                mutex_allocations: alloc::collections::BTreeMap::new(),
+                sem_allocations: alloc::collections::BTreeMap::new(),
+                mutex_requests: alloc::collections::BTreeMap::new(),
+                sem_requests: alloc::collections::BTreeMap::new(),
             },
             thread,
         ))
