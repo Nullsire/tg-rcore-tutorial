@@ -10,8 +10,11 @@ target = "riscv64gc-unknown-none-elf"
 runner = [
     "qemu-system-riscv64",
     "-machine", "virt",       # 使用 QEMU virt 虚拟平台
-    "-nographic",             # 无图形界面，输出重定向到终端
+    "-m", "512M",             # 增大内存，避免图形缓冲区紧张
     "-bios", "none",          # 不加载外部 BIOS/SBI 固件（tg-sbi 内建）
+    "-device", "virtio-gpu-device,bus=virtio-mmio-bus.5", # 挂载 VirtIO GPU
+    "-serial", "stdio",       # 串口直接连接到当前终端
+    "-monitor", "none",       # 禁用 monitor，避免输入被监视器抢走
     "-kernel",                # 后接 ELF 可执行文件路径（由 cargo 自动填充）
 ]
 
@@ -20,6 +23,7 @@ runner = [
 # TG_USER_LOCAL_DIR: 本地缓存目录名（位于 chN/ 下）
 # TG_USER_VERSION : 目标版本号
 [env]
+TG_USER_DIR       = "../tg-rcore-tutorial-user"
 TG_USER_CRATE     = "tg-rcore-tutorial-user"
 TG_USER_LOCAL_DIR = "tg-rcore-tutorial-user"
 TG_USER_VERSION   = "0.4.8"

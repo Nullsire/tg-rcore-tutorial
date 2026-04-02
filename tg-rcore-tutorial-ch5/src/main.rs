@@ -55,7 +55,7 @@ use crate::{
     processor::{PROCESSOR, ProcManager},
 };
 use alloc::{alloc::alloc, collections::BTreeMap};
-use core::{alloc::Layout, cell::UnsafeCell, ffi::CStr, mem::MaybeUninit};
+use core::{alloc::Layout, cell::UnsafeCell, ffi::CStr, mem::MaybeUninit, ptr::NonNull};
 use riscv::register::*;
 use spin::Lazy;
 #[cfg(not(target_arch = "riscv64"))]
@@ -71,6 +71,7 @@ use tg_kernel_vm::{
 use tg_sbi;
 use tg_syscall::Caller;
 use tg_task_manage::{PManager, ProcId};
+use virtio_drivers::{DeviceType, Hal, MmioTransport, Transport, VirtIOGpu, VirtIOHeader};
 use xmas_elf::ElfFile;
 
 /// 构建 VmFlags（虚拟内存标志位）。
@@ -162,6 +163,65 @@ impl KernelSpace {
 /// 内核地址空间全局实例
 static KERNEL_SPACE: KernelSpace = KernelSpace::new();
 
+static mut GPU_DEV: Option<VirtIOGpu<'static, VirtioHal, MmioTransport>> = None;
+static mut FB_PTR: *mut u8 = core::ptr::null_mut();
+static mut FB_LEN: usize = 0;
+static mut FB_WIDTH: u32 = 0;
+static mut FB_HEIGHT: u32 = 0;
+static mut FB_FLUSH_OK_LOGGED: bool = false;
+static mut FB_FLUSH_ERR_COUNT: usize = 0;
+
+const MMIO: &[(usize, usize)] = &[
+    // UART (NS16550A) used by console_getchar_nonblocking
+    (0x1000_0000, 0x1000),
+    (0x1000_1000, 0x1000),
+    (0x1000_2000, 0x1000),
+    (0x1000_3000, 0x1000),
+    (0x1000_4000, 0x1000),
+    (0x1000_5000, 0x1000),
+    (0x1000_6000, 0x1000),
+    (0x1000_7000, 0x1000),
+    (0x1000_8000, 0x1000),
+];
+
+struct VirtioHal;
+
+impl Hal for VirtioHal {
+    fn dma_alloc(pages: usize) -> usize {
+        unsafe {
+            alloc::alloc::alloc_zeroed(Layout::from_size_align_unchecked(
+                pages << Sv39::PAGE_BITS,
+                1 << Sv39::PAGE_BITS,
+            )) as _
+        }
+    }
+
+    fn dma_dealloc(paddr: usize, pages: usize) -> i32 {
+        unsafe {
+            alloc::alloc::dealloc(
+                paddr as _,
+                Layout::from_size_align_unchecked(pages << Sv39::PAGE_BITS, 1 << Sv39::PAGE_BITS),
+            )
+        }
+        0
+    }
+
+    fn phys_to_virt(paddr: usize) -> usize {
+        paddr
+    }
+
+    fn virt_to_phys(vaddr: usize) -> usize {
+        const VALID: VmFlags<Sv39> = build_flags("__V");
+        let ptr = unsafe {
+            KERNEL_SPACE
+                .assume_init_ref()
+                .translate::<u8>(VAddr::new(vaddr), VALID)
+                .unwrap()
+        };
+        ptr.as_ptr() as usize
+    }
+}
+
 /// 应用程序名称到 ELF 数据的映射表
 ///
 /// 在首次访问时通过 `Lazy` 初始化：
@@ -218,6 +278,7 @@ extern "C" fn rust_main() -> ! {
     assert!(portal_layout.size() < 1 << Sv39::PAGE_BITS);
     // 步骤 5：建立内核地址空间并激活 Sv39 分页
     kernel_space(layout, MEMORY, portal_ptr as _);
+    init_gpu();
     // 步骤 6：初始化异界传送门（设置传送门页面的虚拟地址和 slot 数量）
     let portal = unsafe { MultislotPortal::init_transit(PROTAL_TRANSIT.base().val(), 1) };
     // 步骤 7：初始化系统调用处理器
@@ -228,7 +289,11 @@ extern "C" fn rust_main() -> ! {
     tg_syscall::init_memory(&SyscallContext);
     // 步骤 8：加载初始进程 initproc
     // initproc 是所有用户进程的祖先，它会 fork 出 shell 进程
-    let initproc_data = APPS.get("initproc").unwrap();
+    let initproc_data = APPS
+        .get("ch5_pingpong")
+        .or_else(|| APPS.get("user_shell"))
+        .or_else(|| APPS.get("initproc"))
+        .unwrap();
     if let Some(process) = Process::from_elf(ElfFile::new(initproc_data).unwrap()) {
         // 初始化进程管理器并添加 initproc
         PROCESSOR.get_mut().set_manager(ProcManager::new());
@@ -343,11 +408,56 @@ fn kernel_space(layout: tg_linker::KernelLayout, memory: usize, portal: usize) {
         PPN::new(portal >> Sv39::PAGE_BITS),
         build_flags("__G_XWRV"),
     );
+    for (base, len) in MMIO {
+        let s = VAddr::<Sv39>::new(*base);
+        let e = VAddr::<Sv39>::new(*base + *len);
+        space.map_extern(
+            s.floor()..e.ceil(),
+            PPN::new(s.floor().val()),
+            build_flags("_WRV"),
+        );
+    }
     println!();
     // 激活 Sv39 分页模式：写入 satp 寄存器
     unsafe { satp::set(satp::Mode::Sv39, 0, space.root_ppn().val()) };
     // 保存内核地址空间到全局变量
     unsafe { KERNEL_SPACE.write(space) };
+}
+
+fn init_gpu() {
+    let mut found = false;
+    for addr in (0x1000_1000..=0x1000_8000).step_by(0x1000) {
+        if unsafe { core::ptr::read_volatile(addr as *const u32) } != 0x74726976 {
+            continue;
+        }
+        let header = NonNull::new(addr as *mut VirtIOHeader).unwrap();
+        if let Ok(transport) = unsafe { MmioTransport::new(header) } {
+            if transport.device_type() == DeviceType::GPU {
+                if let Ok(mut gpu) = VirtIOGpu::<VirtioHal, MmioTransport>::new(transport) {
+                    if let Ok((width, height)) = gpu.resolution() {
+                        unsafe {
+                            let fb = gpu.setup_framebuffer().unwrap();
+                            let fb_ptr = fb.as_mut_ptr();
+                            let fb_len = fb.len();
+                            core::slice::from_raw_parts_mut(fb_ptr, fb_len).fill(0);
+                            let _ = gpu.flush();
+                            FB_PTR = fb_ptr;
+                            FB_LEN = fb_len;
+                            FB_WIDTH = width;
+                            FB_HEIGHT = height;
+                            GPU_DEV = Some(gpu);
+                        }
+                        log::info!("GPU initialized: {}x{}", width, height);
+                    }
+                }
+                found = true;
+                break;
+            }
+        }
+    }
+    if !found {
+        log::warn!("VirtIO GPU device not found; framebuffer syscalls will be unavailable");
+    }
 }
 
 /// 将内核地址空间中的异界传送门页表项复制到用户地址空间
@@ -367,8 +477,9 @@ mod impls {
     use crate::{
         APPS, PROCESSOR, Sv39, build_flags, process::Process as ProcStruct, processor::ProcManager,
     };
-    use alloc::alloc::alloc_zeroed;
+    use alloc::{alloc::alloc_zeroed, collections::VecDeque, vec::Vec};
     use core::{alloc::Layout, ptr::NonNull};
+    use spin::{Lazy, Mutex};
     use tg_console::log;
     use tg_kernel_vm::{
         PageManager,
@@ -476,6 +587,142 @@ mod impls {
     /// 系统调用上下文，实现 IO、Process、Scheduling、Clock、Memory 等 trait
     pub struct SyscallContext;
 
+    const PIPE_FD_BASE: usize = 3;
+    const PIPE_BUF_CAP: usize = 1024;
+
+    struct Pipe {
+        buf: VecDeque<u8>,
+        read_open: bool,
+        write_open: bool,
+    }
+
+    struct PipeManager {
+        pipes: Vec<Option<Pipe>>,
+    }
+
+    impl PipeManager {
+        fn new() -> Self {
+            Self { pipes: Vec::new() }
+        }
+
+        #[inline]
+        fn decode_fd(fd: usize) -> Option<(usize, bool)> {
+            if fd < PIPE_FD_BASE {
+                return None;
+            }
+            let x = fd - PIPE_FD_BASE;
+            Some((x / 2, (x & 1) != 0))
+        }
+
+        fn alloc_pipe(&mut self) -> (usize, usize) {
+            let idx = if let Some((idx, _)) = self
+                .pipes
+                .iter()
+                .enumerate()
+                .find(|(_, slot)| slot.is_none())
+            {
+                idx
+            } else {
+                self.pipes.push(None);
+                self.pipes.len() - 1
+            };
+
+            self.pipes[idx] = Some(Pipe {
+                buf: VecDeque::with_capacity(PIPE_BUF_CAP),
+                read_open: true,
+                write_open: true,
+            });
+
+            (PIPE_FD_BASE + idx * 2, PIPE_FD_BASE + idx * 2 + 1)
+        }
+
+        fn write_pipe(&mut self, fd: usize, input: &[u8]) -> isize {
+            let Some((idx, is_write_end)) = Self::decode_fd(fd) else {
+                return -1;
+            };
+            if !is_write_end {
+                return -1;
+            }
+            let Some(pipe) = self.pipes.get_mut(idx).and_then(Option::as_mut) else {
+                return -1;
+            };
+            if !pipe.write_open || !pipe.read_open {
+                return -1;
+            }
+
+            let mut wrote = 0usize;
+            for &b in input {
+                if pipe.buf.len() >= PIPE_BUF_CAP {
+                    break;
+                }
+                pipe.buf.push_back(b);
+                wrote += 1;
+            }
+
+            if wrote == 0 {
+                -2
+            } else {
+                wrote as isize
+            }
+        }
+
+        fn read_pipe(&mut self, fd: usize, output: &mut [u8]) -> isize {
+            let Some((idx, is_write_end)) = Self::decode_fd(fd) else {
+                return -1;
+            };
+            if is_write_end {
+                return -1;
+            }
+            let Some(pipe) = self.pipes.get_mut(idx).and_then(Option::as_mut) else {
+                return -1;
+            };
+            if !pipe.read_open {
+                return -1;
+            }
+
+            let mut read = 0usize;
+            while read < output.len() {
+                if let Some(v) = pipe.buf.pop_front() {
+                    output[read] = v;
+                    read += 1;
+                } else {
+                    break;
+                }
+            }
+
+            if read > 0 {
+                return read as isize;
+            }
+            if !pipe.write_open {
+                0
+            } else {
+                -2
+            }
+        }
+
+        fn close_fd(&mut self, fd: usize) -> isize {
+            let Some((idx, is_write_end)) = Self::decode_fd(fd) else {
+                return -1;
+            };
+            let Some(pipe) = self.pipes.get_mut(idx).and_then(Option::as_mut) else {
+                return -1;
+            };
+
+            if is_write_end {
+                pipe.write_open = false;
+            } else {
+                pipe.read_open = false;
+            }
+
+            if !pipe.read_open && !pipe.write_open && pipe.buf.is_empty() {
+                self.pipes[idx] = None;
+            }
+            0
+        }
+    }
+
+    static PIPE_MANAGER: Lazy<Mutex<PipeManager>> = Lazy::new(|| Mutex::new(PipeManager::new()));
+
     /// IO 系统调用实现：write 和 read
     impl IO for SyscallContext {
         /// write 系统调用：将数据写入标准输出
@@ -506,8 +753,20 @@ mod impls {
                     }
                 }
                 _ => {
-                    log::error!("unsupported fd: {fd}");
-                    -1
+                    const READABLE: VmFlags<Sv39> = build_flags("RV");
+                    if let Some(ptr) = PROCESSOR
+                        .get_mut()
+                        .current()
+                        .unwrap()
+                        .address_space
+                        .translate::<u8>(VAddr::new(buf), READABLE)
+                    {
+                        let data = unsafe { core::slice::from_raw_parts(ptr.as_ptr(), count) };
+                        PIPE_MANAGER.lock().write_pipe(fd, data)
+                    } else {
+                        log::error!("ptr not readable");
+                        -1
+                    }
                 }
             }
         }
@@ -541,9 +800,142 @@ mod impls {
                     -1
                 }
             } else {
-                log::error!("unsupported fd: {fd}");
+                const WRITEABLE: VmFlags<Sv39> = build_flags("W_V");
+                if let Some(ptr) = PROCESSOR
+                    .get_mut()
+                    .current()
+                    .unwrap()
+                    .address_space
+                    .translate::<u8>(VAddr::new(buf), WRITEABLE)
+                {
+                    let out = unsafe { core::slice::from_raw_parts_mut(ptr.as_ptr(), count) };
+                    PIPE_MANAGER.lock().read_pipe(fd, out)
+                } else {
+                    log::error!("ptr not writeable");
+                    -1
+                }
+            }
+        }
+
+        fn pipe(&self, _caller: Caller, pipe: usize) -> isize {
+            const WRITEABLE: VmFlags<Sv39> = build_flags("W_V");
+            let current = PROCESSOR.get_mut().current().unwrap();
+
+            let Some(mut read_ptr) = current
+                .address_space
+                .translate::<usize>(VAddr::new(pipe), WRITEABLE)
+            else {
+                return -1;
+            };
+            let Some(mut write_ptr) = current.address_space.translate::<usize>(
+                VAddr::new(pipe + core::mem::size_of::<usize>()),
+                WRITEABLE,
+            ) else {
+                return -1;
+            };
+
+            let (read_fd, write_fd) = PIPE_MANAGER.lock().alloc_pipe();
+            unsafe {
+                *read_ptr.as_mut() = read_fd;
+                *write_ptr.as_mut() = write_fd;
+            }
+            0
+        }
+
+        fn close(&self, _caller: Caller, fd: usize) -> isize {
+            PIPE_MANAGER.lock().close_fd(fd)
+        }
+
+        fn console_getchar_nonblocking(&self, _caller: Caller) -> isize {
+            #[cfg(target_arch = "riscv64")]
+            {
+                let lsr = unsafe { core::ptr::read_volatile((0x1000_0000 + 5) as *const u8) };
+                if lsr & 1 != 0 {
+                    let ch = unsafe { core::ptr::read_volatile(0x1000_0000 as *const u8) };
+                    ch as isize
+                } else {
+                    -1
+                }
+            }
+            #[cfg(not(target_arch = "riscv64"))]
+            {
                 -1
             }
+        }
+
+        fn fb_info(&self, _caller: Caller, width_out: usize, height_out: usize) -> isize {
+            const WRITEABLE: VmFlags<Sv39> = build_flags("W_V");
+            let current = PROCESSOR.get_mut().current().unwrap();
+            let width_ptr = current
+                .address_space
+                .translate::<u32>(VAddr::new(width_out), WRITEABLE);
+            let height_ptr = current
+                .address_space
+                .translate::<u32>(VAddr::new(height_out), WRITEABLE);
+
+            if let (Some(mut wp), Some(mut hp)) = (width_ptr, height_ptr) {
+                unsafe {
+                    *wp.as_mut() = crate::FB_WIDTH;
+                    *hp.as_mut() = crate::FB_HEIGHT;
+                }
+                0
+            } else {
+                -1
+            }
+        }
+
+        fn fb_flush(&self, _caller: Caller, buf: usize, len: usize) -> isize {
+            if unsafe { crate::FB_LEN } == 0 || unsafe { crate::FB_PTR }.is_null() {
+                return -1;
+            }
+            if len != unsafe { crate::FB_LEN } {
+                return -1;
+            }
+
+            const READABLE: VmFlags<Sv39> = build_flags("RV");
+            let current = PROCESSOR.get_mut().current().unwrap();
+            let mut remaining = len;
+            let mut src = buf;
+            let mut dst = unsafe { crate::FB_PTR } as usize;
+            while remaining > 0 {
+                if let Some(src_ptr) = current
+                    .address_space
+                    .translate::<u8>(VAddr::new(src), READABLE)
+                {
+                    let page_end = (src & !0xfff) + 0x1000;
+                    let copy_len = core::cmp::min(remaining, page_end - src);
+                    unsafe {
+                        core::ptr::copy_nonoverlapping(src_ptr.as_ptr(), dst as *mut u8, copy_len)
+                    };
+                    src += copy_len;
+                    dst += copy_len;
+                    remaining -= copy_len;
+                } else {
+                    return -1;
+                }
+            }
+
+            unsafe {
+                if let Some(gpu) = (&raw mut crate::GPU_DEV).as_mut() {
+                    if let Some(gpu) = gpu.as_mut() {
+                        match gpu.flush() {
+                            Ok(_) => {
+                                if !crate::FB_FLUSH_OK_LOGGED {
+                                    crate::FB_FLUSH_OK_LOGGED = true;
+                                    log::info!("GPU fb_flush OK");
+                                }
+                            }
+                            Err(e) => {
+                                if crate::FB_FLUSH_ERR_COUNT < 8 {
+                                    crate::FB_FLUSH_ERR_COUNT += 1;
+                                    log::warn!("GPU fb_flush failed: {:?}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            0
         }
     }
 

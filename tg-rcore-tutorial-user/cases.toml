@@ -81,6 +81,7 @@ cases = [
     "forktest_simple",
     "sbrk",
     "ch5b_usertest",
+    "ch5_pingpong",
     "user_shell",
     "initproc",
 ]

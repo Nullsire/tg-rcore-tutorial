@@ -21,7 +21,7 @@
 //! - 最后看 `exec`：对比“保留 PID、替换执行映像”的设计含义。
 
 use crate::{build_flags, map_portal, parse_flags, Sv39, Sv39Manager};
-use alloc::alloc::alloc_zeroed;
+use alloc::{alloc::alloc_zeroed, vec::Vec};
 use core::alloc::Layout;
 use tg_kernel_context::{foreign::ForeignContext, LocalContext};
 use tg_kernel_vm::{
@@ -121,9 +121,11 @@ impl Process {
 
         const PAGE_SIZE: usize = 1 << Sv39::PAGE_BITS; // 4 KiB
         const PAGE_MASK: usize = PAGE_SIZE - 1;
+        const VALID: tg_kernel_vm::page_table::VmFlags<Sv39> = build_flags("__V");
 
         let mut address_space = AddressSpace::new();
         let mut max_end_va: usize = 0;
+        let mut segments = Vec::new();
 
         // 遍历 ELF 的所有程序段，只处理 LOAD 类型的段
         for program in elf.program_iter() {
@@ -156,13 +158,44 @@ impl Process {
             if program.flags().is_read() {
                 flags[3] = b'R';
             }
-            // 映射段到地址空间，同时复制 ELF 文件中的数据
-            address_space.map(
-                VAddr::new(off_mem).floor()..VAddr::new(end_mem).ceil(),
-                &elf.input[off_file..][..len_file],
-                off_mem & PAGE_MASK,
-                parse_flags(unsafe { core::str::from_utf8_unchecked(&flags) }).unwrap(),
-            );
+            let vm_flags = parse_flags(unsafe { core::str::from_utf8_unchecked(&flags) }).unwrap();
+            segments.push((
+                off_file,
+                len_file,
+                off_mem,
+                end_mem,
+                vm_flags,
+                program.flags().is_write(),
+            ));
+        }
+
+        // 某些用户程序的 LOAD 段可能在页边界上重叠（常见于 text/data 邻接段）。
+        // 先映射可写段可避免重叠页丢失写权限，再逐字节拷贝段数据。
+        segments.sort_by_key(|segment| if segment.5 { 0usize } else { 1usize });
+
+        for (off_file, len_file, off_mem, end_mem, vm_flags, _) in segments {
+            let start_vpn = VAddr::<Sv39>::new(off_mem).floor().val();
+            let end_vpn = VAddr::<Sv39>::new(end_mem).ceil().val();
+
+            for vpn in start_vpn..end_vpn {
+                let page_va = VPN::<Sv39>::new(vpn).base();
+                if address_space.translate::<u8>(page_va, VALID).is_none() {
+                    address_space.map(
+                        VPN::<Sv39>::new(vpn)..VPN::<Sv39>::new(vpn + 1),
+                        &[],
+                        0,
+                        vm_flags,
+                    );
+                }
+            }
+
+            for i in 0..len_file {
+                let va = VAddr::<Sv39>::new(off_mem + i);
+                let mut ptr = address_space.translate::<u8>(va, VALID)?;
+                unsafe {
+                    *ptr.as_mut() = elf.input[off_file + i];
+                }
+            }
         }
 
         // 堆底从 ELF 加载的最高地址的下一页开始

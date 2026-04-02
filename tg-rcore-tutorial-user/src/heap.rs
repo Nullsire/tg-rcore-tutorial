@@ -35,8 +35,8 @@ static MEMORY: StaticCell<[u8; MEMORY_SIZE]> = StaticCell::new([0u8; MEMORY_SIZE
 
 const HEAP_ADDR_BASE: usize = 0x1000_0000;
 const PAGE_SIZE: usize = 4096;
-const HEAP_GROW_MIN: usize = 32 << 20;
-const HEAP_INITIAL_MAP: usize = 64 << 20;
+const HEAP_GROW_MIN: usize = 2 << 20;
+const HEAP_INITIAL_MAP: usize = 4 << 20;
 static NEXT_HEAP_ADDR: StaticCell<usize> = StaticCell::new(HEAP_ADDR_BASE);
 
 #[inline]

@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use std::{collections::HashMap, env, fs, path::PathBuf, process::Command};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const TARGET_ARCH: &str = "riscv64gc-unknown-none-elf";
 
@@ -11,6 +12,7 @@ struct Cases {
 }
 
 fn main() {
+    // Keep this script freshly rerun when we intentionally update embedded user apps.
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=LOG");
     println!("cargo:rerun-if-env-changed=TG_USER_DIR");
@@ -158,6 +160,12 @@ fn write_app_asm(path: &PathBuf, base: u64, step: u64, bins: &[PathBuf], names: 
     use std::io::Write;
     let mut asm = fs::File::create(path)
         .unwrap_or_else(|err| panic!("failed to create {}: {}", path.display(), err));
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+
+    writeln!(asm, "# app-embed-nonce: {nonce}").unwrap();
 
     writeln!(
         asm,
@@ -236,9 +244,16 @@ app_names:
 }
 
 fn ensure_tg_user() -> PathBuf {
+    let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
+
     // 优先使用 TG_USER_DIR 显式指定的目录
     if let Ok(dir) = env::var("TG_USER_DIR") {
-        let path = PathBuf::from(dir);
+        let path = PathBuf::from(&dir);
+        let path = if path.is_absolute() {
+            path
+        } else {
+            manifest_dir.join(path)
+        };
         if path.join("Cargo.toml").exists() {
             return path;
         }
@@ -252,7 +267,6 @@ fn ensure_tg_user() -> PathBuf {
     let version = env::var("TG_USER_VERSION")
         .expect("TG_USER_VERSION not set; add it to .cargo/config.toml [env]");
 
-    let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let tg_user_dir = manifest_dir.join(&local_dir_name);
 
     // 本地缓存目录已存在则直接使用
