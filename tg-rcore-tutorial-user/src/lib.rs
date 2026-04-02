@@ -9,8 +9,6 @@ mod heap;
 
 extern crate alloc;
 
-use tg_console::log;
-
 pub use tg_console::{print, println};
 pub use tg_syscall::*;
 
@@ -33,12 +31,16 @@ pub extern "C" fn _start() -> ! {
 
 #[panic_handler]
 fn panic_handler(panic_info: &core::panic::PanicInfo) -> ! {
-    let err = panic_info.message();
-    if let Some(location) = panic_info.location() {
-        log::error!("Panicked at {}:{}, {err}", location.file(), location.line());
-    } else {
-        log::error!("Panicked: {err}");
+    struct PanicWriter;
+    impl core::fmt::Write for PanicWriter {
+        fn write_str(&mut self, s: &str) -> core::fmt::Result {
+            tg_syscall::write(STDOUT, s.as_bytes());
+            Ok(())
+        }
     }
+
+    let mut w = PanicWriter;
+    let _ = core::fmt::write(&mut w, format_args!("\n[PANIC] {}\n", panic_info));
     exit(1);
     unreachable!()
 }

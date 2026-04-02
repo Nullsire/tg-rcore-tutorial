@@ -129,7 +129,7 @@ impl<Meta: VmMeta, M: PageManager<Meta>> AddressSpace<Meta, M> {
     }
 
     /// 查找指定 VPN 的 PTE 指针（用于修改）
-    fn find_pte_mut(&self, vpn: VPN<Meta>) -> Option<*mut page_table::Pte<Meta>> {
+    pub fn find_pte_mut(&self, vpn: VPN<Meta>) -> Option<*mut page_table::Pte<Meta>> {
         let mut current = self.page_manager.root_ptr();
 
         for level in (0..=Meta::MAX_LEVEL).rev() {

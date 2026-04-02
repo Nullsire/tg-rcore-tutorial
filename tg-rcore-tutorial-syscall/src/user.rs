@@ -86,6 +86,25 @@ pub fn fstat(fd: usize, st: &mut Stat) -> isize {
     unsafe { syscall2(SyscallId::FSTAT, fd, st as *const _ as usize) }
 }
 
+/// 获取帧缓冲区宽高。
+///
+/// 将宽度写入 `width_out`，高度写入 `height_out`，成功返回 0。
+pub fn fb_info(width_out: *mut u32, height_out: *mut u32) -> isize {
+    unsafe { syscall2(SyscallId::FB_INFO, width_out as usize, height_out as usize) }
+}
+
+/// 将像素缓冲区刷新到屏幕。
+///
+/// `buf` 为 ARGB8888 格式的像素数据，`len` 为字节数（需等于 width * height * 4）。
+pub fn fb_flush(buf: *const u8, len: usize) -> isize {
+    unsafe { syscall2(SyscallId::FB_FLUSH, buf as usize, len) }
+}
+
+/// 非阻塞读取一个字符，无输入时返回 -1。
+pub fn console_getchar_nonblocking() -> isize {
+    unsafe { syscall0(SyscallId::CONSOLE_GETCHAR_NONBLOCKING) }
+}
+
 /// 退出当前进程。
 ///
 /// see <https://man7.org/linux/man-pages/man2/exit.2.html>.

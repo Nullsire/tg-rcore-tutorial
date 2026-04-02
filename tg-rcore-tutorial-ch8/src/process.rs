@@ -32,7 +32,7 @@ use core::alloc::Layout;
 use spin::Mutex;
 use tg_kernel_context::{foreign::ForeignContext, LocalContext};
 use tg_kernel_vm::{
-    page_table::{MmuMeta, VAddr, PPN, VPN},
+    page_table::{MmuMeta, VAddr, VmFlags, PPN, VPN},
     AddressSpace,
 };
 use tg_signal::Signal;
@@ -170,6 +170,7 @@ impl Process {
         const PAGE_MASK: usize = PAGE_SIZE - 1;
 
         let mut address_space = AddressSpace::new();
+        let mut last_end_vpn: Option<VPN<Sv39>> = None;
         for program in elf.program_iter() {
             if !matches!(program.get_type(), Ok(program::Type::Load)) { continue; }
             let off_file = program.offset() as usize;
@@ -181,21 +182,101 @@ impl Process {
             if program.flags().is_execute() { flags[1] = b'X'; }
             if program.flags().is_write() { flags[2] = b'W'; }
             if program.flags().is_read() { flags[3] = b'R'; }
+            let seg_flags = parse_flags(unsafe { core::str::from_utf8_unchecked(&flags) }).unwrap();
+
+            let start_vpn = VAddr::new(off_mem).floor();
+            let end_vpn = VAddr::new(end_mem).ceil();
+
+            // Handle ELF segments sharing boundary pages
+            if let Some(prev_end) = last_end_vpn {
+                if start_vpn < prev_end {
+                    // Shared boundary page: write second segment's data into the
+                    // already-mapped page and update PTE flags to union of both.
+                    let shared_vpn = start_vpn;
+                    let page_off = off_mem & PAGE_MASK; // offset of segment data within the shared page
+                    // How much data belongs to this segment on the shared page
+                    let data_on_shared = core::cmp::min(len_file, PAGE_SIZE - page_off);
+
+                    // Translate the shared page's kernel virtual address
+                    // Use VmFlags::VALID since the page exists with some flags
+                    if let Some(page_ptr) = address_space.translate::<u8>(
+                        VAddr::new(shared_vpn.val() << Sv39::PAGE_BITS),
+                        VmFlags::VALID,
+                    ) {
+                        unsafe {
+                            // Write this segment's data into the shared page
+                            core::ptr::copy_nonoverlapping(
+                                elf.input[off_file..].as_ptr(),
+                                page_ptr.as_ptr().add(page_off),
+                                data_on_shared,
+                            );
+                            // Zero-fill between data_on_shared and page end (bss on shared page)
+                            let bss_on_shared = PAGE_SIZE - page_off - data_on_shared;
+                            if bss_on_shared > 0 {
+                                core::ptr::write_bytes(
+                                    page_ptr.as_ptr().add(page_off + data_on_shared),
+                                    0,
+                                    bss_on_shared,
+                                );
+                            }
+                        }
+                    }
+
+                    // Update shared page PTE flags to union of both segments
+                    if let Some(pte_ptr) = address_space.find_pte_mut(shared_vpn) {
+                        unsafe {
+                            let pte = *pte_ptr;
+                            let old_flags = pte.flags();
+                            let new_flags = old_flags | seg_flags;
+                            *pte_ptr = new_flags.build_pte(pte.ppn());
+                        }
+                    }
+
+                    // Map remaining (non-overlapping) pages of this segment
+                    if prev_end < end_vpn {
+                        let remain_start = prev_end;
+                        // Data for remaining pages: skip the shared page's portion
+                        let data_offset_in_file = if data_on_shared < len_file {
+                            data_on_shared
+                        } else {
+                            len_file
+                        };
+                        let remaining_file_data = if data_offset_in_file < len_file {
+                            &elf.input[off_file + data_offset_in_file..][..len_file - data_offset_in_file]
+                        } else {
+                            &[]
+                        };
+                        // Offset within the first remaining page is 0 (page-aligned)
+                        address_space.map(
+                            remain_start..end_vpn,
+                            remaining_file_data,
+                            0,
+                            seg_flags,
+                        );
+                    }
+
+                    last_end_vpn = Some(end_vpn);
+                    continue;
+                }
+            }
+
             address_space.map(
-                VAddr::new(off_mem).floor()..VAddr::new(end_mem).ceil(),
+                start_vpn..end_vpn,
                 &elf.input[off_file..][..len_file],
                 off_mem & PAGE_MASK,
-                parse_flags(unsafe { core::str::from_utf8_unchecked(&flags) }).unwrap(),
+                seg_flags,
             );
+            last_end_vpn = Some(end_vpn);
         }
-        // 分配 2 页用户栈
+        // 分配用户栈（doom 需要较大栈空间）
+        const STACK_PAGES: usize = 2048; // 8 MiB stack for doom
         let stack = unsafe {
             alloc_zeroed(Layout::from_size_align_unchecked(
-                2 << Sv39::PAGE_BITS, 1 << Sv39::PAGE_BITS,
+                STACK_PAGES << Sv39::PAGE_BITS, 1 << Sv39::PAGE_BITS,
             ))
         };
         address_space.map_extern(
-            VPN::new((1 << 26) - 2)..VPN::new(1 << 26),
+            VPN::new((1 << 26) - STACK_PAGES)..VPN::new(1 << 26),
             PPN::new(stack as usize >> Sv39::PAGE_BITS),
             build_flags("U_WRV"),
         );

@@ -321,6 +321,11 @@
 #define __NR_trace 410
 #define __NR_enable_deadlock_detect 469
 
+// Framebuffer / GPU syscalls
+#define __NR_fb_info 600
+#define __NR_fb_flush 601
+#define __NR_console_getchar_nonblocking 602
+
 
 // #define __NR_sysriscv __NR_arch_specific_syscall
 // #define __NR_riscv_flush_icache (__NR_sysriscv + 15)

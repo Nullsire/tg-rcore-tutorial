@@ -164,6 +164,7 @@ cargo build
 > - `TG_USER_DIR`：指定本地 tg-rcore-tutorial-user 源码路径
 > - `TG_USER_VERSION`：指定 tg-rcore-tutorial-user 版本（默认 `0.2.0-preview.1`）
 > - `TG_SKIP_USER_APPS`：跳过用户程序编译
+> - `TG_USER_APPS`：仅构建并打包指定用户程序（逗号分隔），例如 `doom,user_shell,initproc`
 > - `LOG`：设置日志级别
 
 ### 2.2 运行（基础模式）

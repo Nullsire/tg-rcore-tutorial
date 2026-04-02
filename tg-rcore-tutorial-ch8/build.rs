@@ -1,9 +1,16 @@
 use serde::Deserialize;
-use std::{collections::HashMap, env, fs, path::PathBuf, process::Command};
+use std::{
+    collections::{HashMap, HashSet},
+    env, fs,
+    path::PathBuf,
+    process::Command,
+    time::SystemTime,
+};
 use tg_easy_fs::{BlockDevice, EasyFileSystem};
 
 const TARGET_ARCH: &str = "riscv64gc-unknown-none-elf";
 const BLOCK_SZ: usize = 512;
+const EFS_MAGIC: u32 = 0x3b800001;
 
 #[derive(Deserialize, Default)]
 struct Cases {
@@ -20,6 +27,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=TG_USER_CRATE");
     println!("cargo:rerun-if-env-changed=TG_USER_LOCAL_DIR");
     println!("cargo:rerun-if-env-changed=TG_SKIP_USER_APPS");
+    println!("cargo:rerun-if-env-changed=TG_USER_APPS");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_EXERCISE");
 
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
@@ -71,7 +79,15 @@ fn build_apps_and_pack_fs() {
         "cargo:rerun-if-changed={}",
         tg_user_root.join("Cargo.toml").display()
     );
+    println!(
+        "cargo:rerun-if-changed={}",
+        tg_user_root.join("build.rs").display()
+    );
     println!("cargo:rerun-if-changed={}", tg_user_root.join("src").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        tg_user_root.join("src/bin/doomgeneric_src").display()
+    );
 
     let cfg = fs::read_to_string(&cases_path).unwrap_or_else(|err| {
         panic!("failed to read cases.toml from {}: {}", cases_path.display(), err)
@@ -88,7 +104,21 @@ fn build_apps_and_pack_fs() {
     let cases = cases_map.remove(case_key).unwrap_or_default();
     let base = cases.base.unwrap_or(0);
     let step = cases.step.unwrap_or(0);
-    let names = cases.cases.unwrap_or_default();
+    let mut names = cases.cases.unwrap_or_default();
+
+    if case_key == "ch8" {
+        if !names.iter().any(|n| n == "doom") {
+            names.push("doom".to_string());
+        }
+        if !names.iter().any(|n| n == "initproc") {
+            names.push("initproc".to_string());
+        }
+    }
+
+    apply_user_app_filter(case_key, &mut names);
+
+    println!("cargo:warning=ch8 tg-user root: {}", tg_user_root.display());
+    println!("cargo:warning=ch8 app count: {}", names.len());
 
     if names.is_empty() {
         panic!("no user cases found for {case_key} in {}", cases_path.display());
@@ -104,20 +134,214 @@ fn build_apps_and_pack_fs() {
         .join(TARGET_ARCH)
         .join("debug");
 
-    for (i, name) in names.iter().enumerate() {
-        let base_address = base + i as u64 * step;
-        build_user_app(&tg_user_root, name, base_address);
+    let mut watch_paths = vec![
+        cases_path,
+        tg_user_root.join("Cargo.toml"),
+        tg_user_root.join("build.rs"),
+        tg_user_root.join("src"),
+    ];
+    let user_lock = tg_user_root.join("Cargo.lock");
+    if user_lock.exists() {
+        watch_paths.push(user_lock);
+    }
+    let wad_path = tg_user_root.join("doom1.wad");
+    if wad_path.exists() {
+        watch_paths.push(wad_path);
     }
 
-    easy_fs_pack(&names, &app_target_dir, &fs_target_dir).unwrap_or_else(|err| {
+    let fs_img_path = fs_target_dir.join("fs.img");
+    let fs_meta_path = fs_target_dir.join("fs.img.meta");
+    let fs_meta = build_fs_meta(case_key, base, step, &names);
+
+    if is_fs_image_up_to_date(&fs_img_path, &fs_meta_path, &fs_meta, &watch_paths) {
+        println!("cargo:warning=ch8 fs.img cache hit: skip user app build/pack");
+        return;
+    }
+
+    println!("cargo:warning=ch8 fs.img cache miss: rebuild user app image");
+
+    if step == 0 {
+        build_user_apps_batch(&tg_user_root, &names, base);
+    } else {
+        for (i, name) in names.iter().enumerate() {
+            let base_address = base + i as u64 * step;
+            build_user_app(&tg_user_root, name, base_address);
+        }
+    }
+
+    easy_fs_pack(&names, &app_target_dir, &fs_target_dir, &tg_user_root).unwrap_or_else(|err| {
         panic!(
             "failed to pack easy-fs image in {}: {err}",
             fs_target_dir.display()
         )
     });
+
+    fs::write(&fs_meta_path, fs_meta)
+        .unwrap_or_else(|err| panic!("failed to write {}: {}", fs_meta_path.display(), err));
+}
+
+fn apply_user_app_filter(case_key: &str, names: &mut Vec<String>) {
+    let raw = match env::var("TG_USER_APPS") {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    let requested: Vec<String> = raw
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+
+    if requested.is_empty() {
+        return;
+    }
+
+    let available: HashSet<String> = names.iter().cloned().collect();
+    let mut filtered = Vec::new();
+
+    for app in requested {
+        if !available.contains(&app) {
+            panic!(
+                "TG_USER_APPS contains unknown app '{}' for {}. Available apps: {}",
+                app,
+                case_key,
+                names.join(",")
+            );
+        }
+        if !filtered.iter().any(|n| n == &app) {
+            filtered.push(app);
+        }
+    }
+
+    if case_key == "ch8" && !filtered.iter().any(|n| n == "initproc") {
+        filtered.push("initproc".to_string());
+        println!("cargo:warning=TG_USER_APPS missing initproc; appended initproc");
+    }
+
+    println!(
+        "cargo:warning=TG_USER_APPS selected apps: {}",
+        filtered.join(",")
+    );
+    *names = filtered;
+}
+
+fn build_fs_meta(case_key: &str, base: u64, step: u64, names: &[String]) -> String {
+    format!(
+        "case_key={case_key}\nbase={base}\nstep={step}\napps={}\n",
+        names.join(",")
+    )
+}
+
+fn is_fs_image_up_to_date(
+    fs_img_path: &PathBuf,
+    fs_meta_path: &PathBuf,
+    expected_meta: &str,
+    watch_paths: &[PathBuf],
+) -> bool {
+    if !fs_img_path.exists() || !fs_meta_path.exists() {
+        return false;
+    }
+
+    let cached_meta = match fs::read_to_string(fs_meta_path) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    if cached_meta != expected_meta {
+        return false;
+    }
+
+    if !has_valid_efs_magic(fs_img_path) {
+        return false;
+    }
+
+    let fs_img_mtime = match fs::metadata(fs_img_path).and_then(|m| m.modified()) {
+        Ok(t) => t,
+        Err(_) => return false,
+    };
+
+    for path in watch_paths {
+        if let Some(input_mtime) = newest_mtime(path) {
+            if input_mtime > fs_img_mtime {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+fn has_valid_efs_magic(fs_img_path: &PathBuf) -> bool {
+    let bytes = match fs::read(fs_img_path) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+
+    if bytes.len() < 4 {
+        return false;
+    }
+
+    let magic = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    magic == EFS_MAGIC
+}
+
+fn newest_mtime(path: &PathBuf) -> Option<SystemTime> {
+    let metadata = fs::metadata(path).ok()?;
+    let mut newest = metadata.modified().ok()?;
+
+    if metadata.is_dir() {
+        let entries = fs::read_dir(path).ok()?;
+        for entry in entries {
+            let entry = entry.ok()?;
+            if let Some(child_mtime) = newest_mtime(&entry.path()) {
+                if child_mtime > newest {
+                    newest = child_mtime;
+                }
+            }
+        }
+    }
+
+    Some(newest)
+}
+
+fn build_user_apps_batch(tg_user_root: &PathBuf, names: &[String], base_address: u64) {
+    println!(
+        "cargo:warning=building {} user apps in one cargo invocation from {}",
+        names.len(),
+        tg_user_root.display()
+    );
+
+    let mut cmd = Command::new("cargo");
+    cmd.args([
+        "build",
+        "--manifest-path",
+        tg_user_root.join("Cargo.toml").to_string_lossy().as_ref(),
+        "--target",
+        TARGET_ARCH,
+    ]);
+
+    for name in names {
+        cmd.arg("--bin").arg(name);
+    }
+
+    if base_address != 0 {
+        cmd.env("BASE_ADDRESS", base_address.to_string());
+    }
+
+    let status = cmd
+        .status()
+        .expect("failed to execute cargo build for user apps");
+    if !status.success() {
+        panic!("failed to build user apps");
+    }
 }
 
 fn build_user_app(tg_user_root: &PathBuf, name: &str, base_address: u64) {
+    println!(
+        "cargo:warning=building user app '{}' from {}",
+        name,
+        tg_user_root.display()
+    );
     let mut cmd = Command::new("cargo");
     cmd.args([
         "build",
@@ -163,6 +387,7 @@ fn easy_fs_pack(
     cases: &[String],
     app_target: &PathBuf,
     fs_target: &PathBuf,
+    tg_user_root: &PathBuf,
 ) -> std::io::Result<()> {
     use std::fs::OpenOptions;
     use std::io::Read;
@@ -170,7 +395,6 @@ fn easy_fs_pack(
 
     fs::create_dir_all(fs_target)?;
     let fs_file = fs_target.join("fs.img");
-    println!("cargo:rerun-if-changed={}", fs_file.display());
     let block_file = Arc::new(BlockFile(std::sync::Mutex::new({
         let f = OpenOptions::new()
             .read(true)
@@ -190,6 +414,20 @@ fn easy_fs_pack(
         host_file.read_to_end(&mut all_data).unwrap();
         let inode = root_inode.create(case.as_str()).unwrap();
         inode.write_at(0, all_data.as_slice());
+    }
+
+    // Pack extra data files (e.g. doom1.wad) from tg_user_root
+    let extra_files = ["doom1.wad"];
+    for name in &extra_files {
+        let path = tg_user_root.join(name);
+        if path.exists() {
+            println!("cargo:rerun-if-changed={}", path.display());
+            let mut host_file = std::fs::File::open(&path).unwrap();
+            let mut all_data: Vec<u8> = Vec::new();
+            host_file.read_to_end(&mut all_data).unwrap();
+            let inode = root_inode.create(name).unwrap();
+            inode.write_at(0, all_data.as_slice());
+        }
     }
 
     Ok(())

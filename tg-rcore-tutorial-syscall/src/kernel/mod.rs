@@ -71,6 +71,22 @@ pub trait IO: Sync {
     fn fstat(&self, caller: Caller, fd: usize, st: usize) -> isize {
         unimplemented!()
     }
+
+    // --- framebuffer / GPU ---
+    /// Write framebuffer width/height to user pointers.
+    fn fb_info(&self, caller: Caller, width_out: usize, height_out: usize) -> isize {
+        unimplemented!()
+    }
+
+    /// Flush a user-provided pixel buffer to the kernel framebuffer.
+    fn fb_flush(&self, caller: Caller, buf: usize, len: usize) -> isize {
+        unimplemented!()
+    }
+
+    /// Non-blocking getchar from console. Return -1 if no input available.
+    fn console_getchar_nonblocking(&self, caller: Caller) -> isize {
+        unimplemented!()
+    }
 }
 
 pub trait Memory: Sync {
@@ -259,6 +275,11 @@ pub fn handle(caller: Caller, id: SyscallId, args: [usize; 6]) -> SyscallResult 
             io.unlinkat(caller, args[0] as _, args[1], args[2] as _)
         }),
         Id::FSTAT => IO.call(id, |io| io.fstat(caller, args[0], args[1])),
+        Id::FB_INFO => IO.call(id, |io| io.fb_info(caller, args[0], args[1])),
+        Id::FB_FLUSH => IO.call(id, |io| io.fb_flush(caller, args[0], args[1])),
+        Id::CONSOLE_GETCHAR_NONBLOCKING => {
+            IO.call(id, |io| io.console_getchar_nonblocking(caller))
+        }
         Id::EXIT => PROCESS.call(id, |proc| proc.exit(caller, args[0])),
         Id::CLONE => PROCESS.call(id, |proc| proc.fork(caller)),
         Id::EXECVE => PROCESS.call(id, |proc| proc.exec(caller, args[0], args[1])),

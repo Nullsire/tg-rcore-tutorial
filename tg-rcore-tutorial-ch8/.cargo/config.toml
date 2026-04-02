@@ -5,23 +5,29 @@ target = "riscv64gc-unknown-none-elf"
 # QEMU 运行配置
 # 使用 qemu-system-riscv64 运行编译产物
 # -machine virt        ：QEMU virt 虚拟机平台
-# -nographic           ：无图形界面，输出到终端
 # -bios none           ：不使用 BIOS（内核直接启动）
 # -drive ...           ：挂载 easy-fs 磁盘镜像（包含用户程序）
 # -device ...          ：VirtIO 块设备
+# -device virtio-gpu   ：VirtIO GPU 设备（用于 doom 帧缓冲）
+# -serial mon:stdio    ：串口输出到终端（替代 -nographic）
 # -kernel              ：内核 ELF 文件
 [target.riscv64gc-unknown-none-elf]
 runner = [
     "qemu-system-riscv64",
     "-machine",
     "virt",
-    "-nographic",
+    "-m",
+    "512M",
     "-bios",
     "none",
     "-drive",
     "file=target/riscv64gc-unknown-none-elf/debug/fs.img,if=none,format=raw,id=x0",
     "-device",
     "virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0",
+    "-device",
+    "virtio-gpu-device,bus=virtio-mmio-bus.5",
+    "-serial",
+    "mon:stdio",
     "-kernel",
 ]
 
@@ -33,3 +39,4 @@ runner = [
 TG_USER_CRATE     = "tg-rcore-tutorial-user"
 TG_USER_LOCAL_DIR = "tg-rcore-tutorial-user"
 TG_USER_VERSION   = "0.4.8"
+TG_USER_DIR       = "/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user"

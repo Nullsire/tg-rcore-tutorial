@@ -55,8 +55,10 @@ impl BlockDevice for VirtIOBlock {
     }
 }
 
-/// VirtIO HAL（硬件抽象层）实现
-struct VirtioHal;
+/// VirtIO HAL（硬件抽象层）实现。
+///
+/// 供块设备和 GPU 设备复用。
+pub(crate) struct VirtioHal;
 
 impl Hal for VirtioHal {
     /// DMA 内存分配

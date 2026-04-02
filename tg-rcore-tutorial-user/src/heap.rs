@@ -28,10 +28,47 @@ impl<T> StaticCell<T> {
     }
 }
 
+// 64 KiB initial heap — keeps BSS small.
+// Extended at runtime via mmap syscall to 16 MiB.
+const MEMORY_SIZE: usize = 64 << 10;
+static MEMORY: StaticCell<[u8; MEMORY_SIZE]> = StaticCell::new([0u8; MEMORY_SIZE]);
+
+const HEAP_ADDR_BASE: usize = 0x1000_0000;
+const PAGE_SIZE: usize = 4096;
+const HEAP_GROW_MIN: usize = 32 << 20;
+const HEAP_INITIAL_MAP: usize = 64 << 20;
+static NEXT_HEAP_ADDR: StaticCell<usize> = StaticCell::new(HEAP_ADDR_BASE);
+
+#[inline]
+const fn page_align_up(size: usize) -> usize {
+    (size + (PAGE_SIZE - 1)) & !(PAGE_SIZE - 1)
+}
+
+fn grow_heap(min_need: usize) -> bool {
+    let mut grow = page_align_up(min_need.max(HEAP_GROW_MIN));
+    if !grow.is_power_of_two() {
+        grow = grow.next_power_of_two();
+    }
+
+    // keep growth chunks practical even for very large one-shot requests
+    if grow > (128 << 20) {
+        grow = page_align_up(min_need);
+    }
+
+    let addr = unsafe { *NEXT_HEAP_ADDR.get() };
+    let ret = tg_syscall::mmap(addr, grow, 3); // prot = RW
+    if ret < 0 {
+        return false;
+    }
+
+    unsafe {
+        heap_mut().transfer(NonNull::new_unchecked(addr as *mut u8), grow);
+        *NEXT_HEAP_ADDR.get() = addr + grow;
+    }
+    true
+}
+
 pub fn init() {
-    // 托管空间 16 KiB
-    const MEMORY_SIZE: usize = 16 << 10;
-    static MEMORY: StaticCell<[u8; MEMORY_SIZE]> = StaticCell::new([0u8; MEMORY_SIZE]);
     unsafe {
         heap_mut().init(
             core::mem::size_of::<usize>().trailing_zeros() as _,
@@ -42,6 +79,9 @@ pub fn init() {
             MEMORY_SIZE,
         );
     }
+
+    // Map a larger initial heap for memory-heavy apps (e.g. Doom), then grow on demand.
+    let _ = grow_heap(HEAP_INITIAL_MAP);
 }
 
 type MutAllocator<const N: usize> = BuddyAllocator<N, UsizeBuddy, LinkedListBuddy>;
@@ -64,6 +104,13 @@ unsafe impl GlobalAlloc for Global {
         if let Ok((ptr, _)) = heap_mut().allocate_layout::<u8>(layout) {
             ptr.as_ptr()
         } else {
+            // Try to extend user heap lazily via mmap, then retry once.
+            let need = page_align_up(layout.size().saturating_add(layout.align()));
+            if grow_heap(need) {
+                if let Ok((ptr, _)) = heap_mut().allocate_layout::<u8>(layout) {
+                    return ptr.as_ptr();
+                }
+            }
             handle_alloc_error(layout)
         }
     }

@@ -18,6 +18,8 @@ path = "src/lib.rs"
 
 [profile.dev]
 panic = "abort"
+debug-assertions = false
+overflow-checks = false
 
 [profile.release]
 panic = "abort"
@@ -26,3 +28,5 @@ panic = "abort"
 tg-console = { package = "tg-rcore-tutorial-console", path = "../tg-rcore-tutorial-console", version = "0.4.2-preview.7" }
 tg-syscall = { package = "tg-rcore-tutorial-syscall", path = "../tg-rcore-tutorial-syscall", version = "0.4.2-preview.7", features = ["user"] }
 customizable-buddy = "0.0.2"
+[build-dependencies]
+cc = "1.0"

@@ -111,6 +111,18 @@ fn heap_mut() -> &'static mut BuddyAllocator<21, UsizeBuddy, LinkedListBuddy> {
     unsafe { &mut *HEAP.get() }
 }
 
+/// 返回堆分配器剩余可用字节数。
+#[inline]
+pub fn free_memory() -> usize {
+    heap_mut().free()
+}
+
+/// 返回堆分配器管理的总字节数。
+#[inline]
+pub fn capacity() -> usize {
+    heap_mut().capacity()
+}
+
 struct Global;
 
 #[global_allocator]

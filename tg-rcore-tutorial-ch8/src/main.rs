@@ -68,9 +68,10 @@ use crate::{
     impls::{Sv39Manager, SyscallContext},
     process::{Process, Thread},
     processor::{ProcManager, ProcessorInner, ThreadManager},
+    virtio_block::VirtioHal,
 };
 use alloc::alloc::alloc;
-use core::{alloc::Layout, cell::UnsafeCell, mem::MaybeUninit};
+use core::{alloc::Layout, cell::UnsafeCell, mem::MaybeUninit, ptr::NonNull};
 use impls::Console;
 pub use processor::PROCESSOR;
 use riscv::register::*;
@@ -89,6 +90,7 @@ use tg_sbi;
 use tg_signal::SignalResult;
 use tg_syscall::Caller;
 use tg_task_manage::ProcId;
+use virtio_drivers::{DeviceType, MmioTransport, Transport, VirtIOGpu, VirtIOHeader};
 use xmas_elf::ElfFile;
 
 /// 构建 VmFlags
@@ -128,8 +130,8 @@ unsafe extern "C" fn _start() -> ! {
     )
 }
 
-/// 物理内存容量 = 48 MiB
-const MEMORY: usize = 48 << 20;
+/// 物理内存容量 = 508 MiB（QEMU 512M RAM，内核从 0x80200000 开始，可用上限 ~510 MiB）
+const MEMORY: usize = 508 << 20;
 /// 异界传送门所在虚页
 const PROTAL_TRANSIT: VPN<Sv39> = VPN::MAX;
 
@@ -159,8 +161,25 @@ impl KernelSpace {
 /// 内核地址空间全局实例
 static KERNEL_SPACE: KernelSpace = KernelSpace::new();
 
+/// 全局 GPU 控制对象与帧缓冲区状态。
+static mut GPU_DEV: Option<VirtIOGpu<'static, VirtioHal, MmioTransport>> = None;
+static mut FB_PTR: *mut u8 = core::ptr::null_mut();
+static mut FB_LEN: usize = 0;
+static mut FB_WIDTH: u32 = 0;
+static mut FB_HEIGHT: u32 = 0;
+
 /// VirtIO MMIO 设备地址范围
-pub const MMIO: &[(usize, usize)] = &[(0x1000_1000, 0x00_1000)];
+pub const MMIO: &[(usize, usize)] = &[
+    (0x1000_0000, 0x00_1000),
+    (0x1000_1000, 0x00_1000),
+    (0x1000_2000, 0x00_1000),
+    (0x1000_3000, 0x00_1000),
+    (0x1000_4000, 0x00_1000),
+    (0x1000_5000, 0x00_1000),
+    (0x1000_6000, 0x00_1000),
+    (0x1000_7000, 0x00_1000),
+    (0x1000_8000, 0x00_1000),
+];
 
 /// 内核主函数
 ///
@@ -192,6 +211,7 @@ extern "C" fn rust_main() -> ! {
     assert!(portal_layout.size() < 1 << Sv39::PAGE_BITS);
     // 步骤 5：内核地址空间
     kernel_space(layout, MEMORY, portal_ptr as _);
+    init_gpu();
     // 步骤 6：异界传送门初始化
     let portal = unsafe { MultislotPortal::init_transit(PROTAL_TRANSIT.base().val(), 1) };
     // 步骤 7：系统调用初始化
@@ -202,7 +222,13 @@ extern "C" fn rust_main() -> ! {
     tg_syscall::init_signal(&SyscallContext);
     tg_syscall::init_thread(&SyscallContext);       // 本章新增：线程系统调用
     tg_syscall::init_sync_mutex(&SyscallContext);   // 本章新增：同步原语系统调用
+    tg_syscall::init_memory(&SyscallContext);       // Memory (mmap) 系统调用
     // 步骤 8：加载 initproc（返回 Process + Thread）
+    log::info!(
+        "Heap: {}/{} MiB free",
+        tg_kernel_alloc::free_memory() >> 20,
+        tg_kernel_alloc::capacity() >> 20
+    );
     let initproc = read_all(FS.open("initproc", OpenFlags::RDONLY).unwrap());
     if let Some((process, thread)) = Process::from_elf(ElfFile::new(initproc.as_slice()).unwrap()) {
         // 初始化双层管理器：ProcManager（进程）+ ThreadManager（线程）
@@ -267,8 +293,101 @@ extern "C" fn rust_main() -> ! {
                         },
                     }
                 }
+                scause::Trap::Exception(scause::Exception::StorePageFault) => {
+                    let stval = riscv::register::stval::read();
+                    let vpn_val = stval >> Sv39::PAGE_BITS;
+                    let vpn = VPN::<Sv39>::new(vpn_val);
+                    // Read saved user SP from current thread's context
+                    let user_sp = unsafe {
+                        (*processor).current()
+                            .map(|t| t.context.context.sp())
+                            .unwrap_or(0)
+                    };
+                    let user_sepc = riscv::register::sepc::read();
+                    // Stack auto-growth: map new pages below current stack
+                    const STACK_TOP: usize = 1 << 38;
+                    // Initial stack bottom VPN = (1<<26) - 2048, allow 128 MiB growth below it
+                    const INITIAL_STACK_BOTTOM_VPN: usize = (1usize << 26) - 2048;
+                    const MAX_STACK_GROWTH_PAGES: usize = 128 * 256; // 128 MiB
+                    const STACK_FLOOR_VPN: usize =
+                        INITIAL_STACK_BOTTOM_VPN - MAX_STACK_GROWTH_PAGES;
+                    // Only log every 4096th fault to avoid flooding
+                    static PAGEFAULT_COUNT: core::sync::atomic::AtomicUsize =
+                        core::sync::atomic::AtomicUsize::new(0);
+                    if vpn_val >= STACK_FLOOR_VPN && vpn_val < (STACK_TOP >> Sv39::PAGE_BITS) {
+                        let count = PAGEFAULT_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                        if count < 5 || count % 4096 == 0 {
+                            let grown_pages = INITIAL_STACK_BOTTOM_VPN
+                                .saturating_sub(vpn_val);
+                            log::warn!(
+                                "SPF#{count} sepc={:#x} stval={:#x} sp={:#x} grown={}/{} pages free={}/{} MiB",
+                                user_sepc, stval, user_sp, grown_pages, MAX_STACK_GROWTH_PAGES,
+                                tg_kernel_alloc::free_memory() >> 20,
+                                tg_kernel_alloc::capacity() >> 20,
+                            );
+                        }
+                        let current_proc = unsafe { (*processor).get_current_proc().unwrap() };
+                        let needs_map = current_proc.address_space.find_pte_mut(vpn)
+                            .map_or(true, |p| unsafe { (*p).0 } == 0);
+                        if needs_map {
+                            let page = unsafe {
+                                alloc::alloc::alloc_zeroed(
+                                    core::alloc::Layout::from_size_align_unchecked(
+                                        1 << Sv39::PAGE_BITS, 1 << Sv39::PAGE_BITS,
+                                    )
+                                )
+                            };
+                            if !page.is_null() {
+                                current_proc.address_space.map_extern(
+                                    vpn..vpn + 1,
+                                    PPN::new(page as usize >> Sv39::PAGE_BITS),
+                                    build_flags("U_WRV"),
+                                );
+                                // Flush TLB after page table modification
+                                unsafe { core::arch::asm!("sfence.vma") };
+                                let pthreads = unsafe { (*processor).get_thread(current_proc.pid).unwrap() };
+                                unsafe {
+                                    (*processor).get_task(pthreads[0]).unwrap().context.satp =
+                                        (8 << 60) | current_proc.address_space.root_ppn().val();
+                                }
+                                unsafe { (*processor).make_current_suspend() };
+                            } else {
+                                log::error!(
+                                    "Stack growth OOM at VPN {:#x}, free={}/{} MiB",
+                                    vpn_val,
+                                    tg_kernel_alloc::free_memory() >> 20,
+                                    tg_kernel_alloc::capacity() >> 20,
+                                );
+                                unsafe { (*processor).make_current_exited(-3) };
+                            }
+                        } else {
+                            log::error!("StorePageFault on mapped page stval={:#x}", stval);
+                            unsafe { (*processor).make_current_exited(-3) };
+                        }
+                    } else {
+                        log::error!(
+                            "SPF outside stack growth region sepc={:#x} stval={:#x} sp={:#x} (count={})",
+                            user_sepc, stval, user_sp,
+                            PAGEFAULT_COUNT.load(core::sync::atomic::Ordering::Relaxed),
+                        );
+                        unsafe { (*processor).make_current_exited(-3) };
+                    }
+                }
                 e => {
-                    log::error!("unsupported trap: {e:?}");
+                    let stval = riscv::register::stval::read();
+                    let user_sepc = riscv::register::sepc::read();
+                    let user_sp = unsafe {
+                        (*processor)
+                            .current()
+                            .map(|t| t.context.context.sp())
+                            .unwrap_or(0)
+                    };
+                    log::error!(
+                        "unsupported trap: {e:?}, sepc={:#x}, stval={:#x}, sp={:#x}",
+                        user_sepc,
+                        stval,
+                        user_sp,
+                    );
                     unsafe { (*processor).make_current_exited(-3) };
                 }
             }
@@ -333,6 +452,39 @@ fn kernel_space(layout: tg_linker::KernelLayout, memory: usize, portal: usize) {
     }
     unsafe { satp::set(satp::Mode::Sv39, 0, space.root_ppn().val()) };
     unsafe { KERNEL_SPACE.write(space) };
+}
+
+/// 探测 GPU 并挂载与提取全局句柄
+fn init_gpu() {
+    for addr in (0x1000_1000..=0x1000_8000).step_by(0x1000) {
+        if unsafe { core::ptr::read_volatile(addr as *const u32) } != 0x74726976 {
+            continue;
+        }
+        let header = NonNull::new(addr as *mut VirtIOHeader).unwrap();
+        if let Ok(transport) = unsafe { MmioTransport::new(header) } {
+            if transport.device_type() == DeviceType::GPU {
+                if let Ok(mut gpu) = VirtIOGpu::<VirtioHal, MmioTransport>::new(transport) {
+                    if let Ok((width, height)) = gpu.resolution() {
+                        unsafe {
+                            let fb = gpu.setup_framebuffer().unwrap();
+                            let fb_ptr = fb.as_mut_ptr();
+                            let fb_len = fb.len();
+                            core::slice::from_raw_parts_mut(fb_ptr, fb_len).fill(0); // 清屏
+                            let _ = gpu.flush();
+
+                            FB_PTR = fb_ptr;
+                            FB_LEN = fb_len;
+                            FB_WIDTH = width;
+                            FB_HEIGHT = height;
+                            GPU_DEV = Some(gpu);
+                        }
+                        log::info!("GPU Initialized & Framebuffer created ({}x{}).", width, height);
+                    }
+                }
+                break;
+            }
+        }
+    }
 }
 
 /// 将异界传送门映射到用户地址空间
@@ -525,6 +677,77 @@ mod impls {
             current.fd_table.push(Some(Mutex::new(Fd::PipeWrite(write_end))));
             0
         }
+        fn fb_info(&self, _caller: Caller, width_out: usize, height_out: usize) -> isize {
+            let current = PROCESSOR.get_mut().get_current_proc().unwrap();
+            let width_ptr = current.address_space.translate::<u32>(VAddr::new(width_out), WRITEABLE);
+            let height_ptr = current.address_space.translate::<u32>(VAddr::new(height_out), WRITEABLE);
+
+            if let (Some(mut wp), Some(mut hp)) = (width_ptr, height_ptr) {
+                unsafe {
+                    *wp.as_mut() = crate::FB_WIDTH;
+                    *hp.as_mut() = crate::FB_HEIGHT;
+                }
+                0
+            } else {
+                -1
+            }
+        }
+
+        fn fb_flush(&self, _caller: Caller, buf: usize, len: usize) -> isize {
+            if unsafe { crate::FB_LEN } == 0 || unsafe { crate::FB_PTR }.is_null() {
+                return -1;
+            }
+            if len != unsafe { crate::FB_LEN } {
+                return -1;
+            }
+
+            let current = PROCESSOR.get_mut().get_current_proc().unwrap();
+            let mut remaining = len;
+            let mut src = buf;
+            let mut dst = unsafe { crate::FB_PTR } as usize;
+
+            while remaining > 0 {
+                if let Some(src_ptr) = current.address_space.translate::<u8>(VAddr::new(src), READABLE) {
+                    let page_end = (src & !0xfff) + 0x1000;
+                    let copy_len = core::cmp::min(remaining, page_end - src);
+
+                    unsafe {
+                        core::ptr::copy_nonoverlapping(src_ptr.as_ptr(), dst as *mut u8, copy_len);
+                    }
+
+                    src += copy_len;
+                    dst += copy_len;
+                    remaining -= copy_len;
+                } else {
+                    return -1; // 页面未映射或不可读
+                }
+            }
+
+            unsafe {
+                if let Some(gpu) = (&raw mut crate::GPU_DEV).as_mut() {
+                    if let Some(gpu) = gpu.as_mut() {
+                        let _ = gpu.flush();
+                    }
+                }
+            }
+            0
+        }
+
+        fn console_getchar_nonblocking(&self, _caller: Caller) -> isize {
+            #[cfg(target_arch = "riscv64")]
+            {
+                // NS16550A on QEMU virt: LSR bit0 indicates data ready.
+                let lsr = unsafe { core::ptr::read_volatile((0x1000_0000 + 5) as *const u8) };
+                if lsr & 1 != 0 {
+                    let ch = unsafe { core::ptr::read_volatile(0x1000_0000 as *const u8) };
+                    ch as isize
+                } else {
+                    -1
+                }
+            }
+            #[cfg(not(target_arch = "riscv64"))]
+            -1
+        }
     }
 
     /// 进程管理系统调用
@@ -549,6 +772,8 @@ mod impls {
 
         /// exec：从文件系统加载新程序
         fn exec(&self, _caller: Caller, path: usize, count: usize) -> isize {
+            let free_mem = tg_kernel_alloc::free_memory() >> 20;
+            log::info!("exec: free={free_mem} MiB");
             const READABLE: VmFlags<Sv39> = build_flags("RV");
             let current = PROCESSOR.get_mut().get_current_proc().unwrap();
             current.address_space
@@ -611,6 +836,63 @@ mod impls {
                 }
                 _ => -1,
             }
+        }
+    }
+
+    impl Memory for SyscallContext {
+        fn mmap(
+            &self,
+            _caller: Caller,
+            addr: usize,
+            length: usize,
+            _prot: i32,
+            _flags: i32,
+            _fd: i32,
+            _offset: usize,
+        ) -> isize {
+            log::info!(
+                "mmap addr={:#x} len={:#x} ({} KiB) free={}/{} MiB",
+                addr, length, length >> 10,
+                tg_kernel_alloc::free_memory() >> 20,
+                tg_kernel_alloc::capacity() >> 20,
+            );
+            let page_size: usize = 1 << Sv39::PAGE_BITS;
+            let page_mask = page_size - 1;
+            if addr & page_mask != 0 || length == 0 {
+                return -1;
+            }
+            let start_vpn = addr >> Sv39::PAGE_BITS;
+            let npages = (length + page_mask) >> Sv39::PAGE_BITS;
+            // Allocate physical pages
+            let flags = build_flags("U_WRV");
+            let page = unsafe {
+                alloc_zeroed(Layout::from_size_align_unchecked(
+                    npages << Sv39::PAGE_BITS,
+                    1 << Sv39::PAGE_BITS,
+                ))
+            };
+            if page.is_null() {
+                return -1;
+            }
+            let ppn = page as usize >> Sv39::PAGE_BITS;
+            let processor: *mut ProcessorInner = PROCESSOR.get_mut() as *mut ProcessorInner;
+            let current_proc = unsafe { (*processor).get_current_proc().unwrap() };
+            current_proc.address_space.map_extern(
+                VPN::new(start_vpn)..VPN::new(start_vpn + npages),
+                PPN::new(ppn),
+                flags,
+            );
+            // Update satp for the current thread
+            let pthreads = unsafe { (*processor).get_thread(current_proc.pid).unwrap() };
+            unsafe {
+                (*processor).get_task(pthreads[0]).unwrap().context.satp =
+                    (8 << 60) | current_proc.address_space.root_ppn().val();
+            }
+            0
+        }
+
+        fn munmap(&self, _caller: Caller, _addr: usize, _length: usize) -> isize {
+            0 // stub: unmap is optional for doom
         }
     }
 
