@@ -1,0 +1,13 @@
+[package]
+name = "jfs-zgy"
+version = "0.1.0"
+edition = "2024"
+description = "A journaling file system demonstrating crash consistency (Three Easy Pieces)"
+license = "MIT"
+
+[[bin]]
+name = "jfs"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }

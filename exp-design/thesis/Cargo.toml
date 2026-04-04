@@ -1,0 +1,9 @@
+[package]
+name = "thesis-zgy"
+version = "0.1.0"
+edition = "2024"
+description = "Real-time scheduling experiment: EDF scheduler with priority inversion and priority inheritance protocol simulation"
+license = "MIT"
+
+[dependencies]
+rand = "0.8"
