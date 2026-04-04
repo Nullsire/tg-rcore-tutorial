@@ -1,0 +1,242 @@
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs-4-#[macro_use]
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs-5-extern crate user_lib;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs-6-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs:7:use user_lib::mmap;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs-8-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs-9-// 教学目标：
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs:10:// 覆盖 mmap 参数校验：地址对齐、prot 合法性、标志位范围等错误输入。
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs:11:// 理想结果：对于错误的 mmap 返回 -1。
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs-12-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs-13-#[unsafe(no_mangle)]
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs-14-extern "C" fn main() -> i32 {
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs-15-    let start: usize = 0x10000000;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs-16-    let len: usize = 4096;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs-17-    let prot: usize = 3;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs:18:    assert_eq!(0, mmap(start, len, prot));
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs:19:    assert_eq!(mmap(start - len, len + 1, prot), -1); // 地址未对齐
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs:20:    assert_eq!(mmap(start + len + 1, len, prot), -1); // 地址未对齐
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs:21:    assert_eq!(mmap(start + len, len, 0), -1); // prot 为 0 无意义
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs:22:    assert_eq!(mmap(start + len, len, prot | 8), -1); // prot 其他位非 0
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs-23-    println!("Test 04_4 test OK!");
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs-24-    0
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap3.rs-25-}
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch5b_usertest.rs-15-    "fork_exit",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch5b_usertest.rs-16-    "forktest_simple",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch5b_usertest.rs-17-    "12forktest",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch5b_usertest.rs:18:    "sbrk",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch5b_usertest.rs-19-];
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch5b_usertest.rs-20-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch5b_usertest.rs-21-const TEST_NUM: usize = TESTS.len();
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap2.rs-4-#[macro_use]
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap2.rs-5-extern crate user_lib;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap2.rs-6-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap2.rs:7:use user_lib::mmap;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap2.rs-8-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap2.rs-9-// 教学目标：
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap2.rs-10-// 覆盖非法保护位组合（R=0,W=1）并验证访问时异常路径。
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap2.rs-16-    let start: usize = 0x10000000;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap2.rs-17-    let len: usize = 4096;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap2.rs-18-    let prot: usize = 2; // 只写（在 RISC-V 中非法）
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap2.rs:19:    assert_eq!(0, mmap(start, len, prot));
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap2.rs-20-    let addr: *mut u8 = start as *mut u8;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap2.rs-21-    unsafe {
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap2.rs-22-        assert!(*addr != 0); // 尝试读取，应该触发异常
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap2.rs-4-#[macro_use]
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap2.rs-5-extern crate user_lib;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap2.rs-6-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap2.rs:7:use user_lib::{mmap, munmap};
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap2.rs-8-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap2.rs-9-// 教学目标：
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap2.rs-10-// 覆盖 munmap 参数错误路径（范围超界、地址未对齐）。
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap2.rs-15-    let start: usize = 0x10000000;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap2.rs-16-    let len: usize = 4096;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap2.rs-17-    let prot: usize = 3;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap2.rs:18:    assert_eq!(0, mmap(start, len, prot));
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap2.rs-19-    assert_eq!(munmap(start, len + 1), -1); // 存在未映射的页
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap2.rs-20-    assert_eq!(munmap(start + 1, len - 1), -1); // 地址未对齐
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap2.rs:21:    println!("Test 04_6 ummap2 OK!");
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap2.rs-22-    0
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap2.rs-23-}
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap1.rs-4-#[macro_use]
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap1.rs-5-extern crate user_lib;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap1.rs-6-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap1.rs:7:use user_lib::mmap;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap1.rs-8-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap1.rs-9-// 教学目标：
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap1.rs-10-// 映射只读页后尝试写入，期望触发异常并由内核终止进程。
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap1.rs-15-    let start: usize = 0x10000000;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap1.rs-16-    let len: usize = 4096;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap1.rs-17-    let prot: usize = 1; // 只读
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap1.rs:18:    assert_eq!(0, mmap(start, len, prot));
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap1.rs-19-    let addr: *mut u8 = start as *mut u8;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap1.rs-20-    unsafe {
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap1.rs-21-        *addr = start as u8; // 尝试写入只读页，应该触发异常
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs-4-#[macro_use]
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs-5-extern crate user_lib;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs-6-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs:7:use user_lib::{mmap, munmap};
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs-8-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs-9-// 教学目标：
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs-10-// 验证“先映射-局部解除映射-再映射”后的连续地址可读写正确性。
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs-14-    let start: usize = 0x10000000;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs-15-    let len: usize = 4096;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs-16-    let prot: usize = 3;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs:17:    assert_eq!(0, mmap(start, len, prot));
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs:18:    assert_eq!(mmap(start + len, len * 2, prot), 0);
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs-19-    assert_eq!(munmap(start, len), 0);
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs:20:    assert_eq!(mmap(start - len, len + 1, prot), 0);
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs-21-    for i in (start - len)..(start + len * 3) {
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs-22-        let addr: *mut u8 = i as *mut u8;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs-23-        unsafe {
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs-30-            assert_eq!(*addr, i as u8);
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs-31-        }
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs-32-    }
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs:33:    println!("Test 04_5 ummap OK!");
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs-34-    0
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_unmap.rs-35-}
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-5-extern crate user_lib;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-6-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-7-use core::ptr::slice_from_raw_parts_mut;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs:8:use user_lib::sbrk;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-9-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-10-// 教学目标：
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs:11:// 系统化验证 `sbrk` 的扩容/缩容语义，并最终触发越界访问检查。
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-12-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-13-#[unsafe(no_mangle)]
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-14-pub extern "C" fn main() -> i32 {
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs:15:    println!("Test sbrk start.");
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-16-    const PAGE_SIZE: usize = 0x1000;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs:17:    let origin_brk = sbrk(0);
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-18-    println!("origin break point = {:x}", origin_brk);
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs:19:    let brk = sbrk(PAGE_SIZE as i32);
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-20-    if brk != origin_brk {
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-21-        return -1;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-22-    }
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs:23:    let brk = sbrk(0);
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-24-    println!("one page allocated,  break point = {:x}", brk);
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-25-    println!("try write to allocated page");
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-26-    // 将新分配页映射成切片，验证其可读写。
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-31-        new_page[pos] = 1;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-32-    }
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-33-    println!("write ok");
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs:34:    sbrk(PAGE_SIZE as i32 * 10);
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs:35:    let brk = sbrk(0);
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-36-    println!("10 page allocated,  break point = {:x}", brk);
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs:37:    sbrk(PAGE_SIZE as i32 * -11);
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs:38:    let brk = sbrk(0);
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-39-    println!("11 page DEALLOCATED,  break point = {:x}", brk);
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-40-    println!("try DEALLOCATED more one page, should be failed.");
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs:41:    let ret = sbrk(PAGE_SIZE as i32 * -1);
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-42-    if ret != -1 {
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs:43:        println!("Test sbrk failed!");
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-44-        return -1;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-45-    }
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs:46:    println!("Test sbrk almost OK!");
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-47-    println!("now write to deallocated page, should cause page fault.");
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-48-    // 故意写回收后的地址，期望触发 page fault。
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-49-    for pos in 0..PAGE_SIZE {
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-50-        new_page[pos] = 2;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-51-    }
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs:52:    println!("Test sbrk failed!");
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-53-    0
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/sbrk.rs-54-}
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6b_usertest.rs-15-    "fork_exit",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6b_usertest.rs-16-    "forktest_simple",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6b_usertest.rs-17-    "12forktest",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6b_usertest.rs:18:    "sbrk",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6b_usertest.rs-19-    "filetest_simple",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6b_usertest.rs-20-    "cat_filea",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6b_usertest.rs-21-];
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs-4-#[macro_use]
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs-5-extern crate user_lib;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs-6-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs:7:use user_lib::{mmap, munmap, trace_read, trace_write};
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs-8-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs-9-// 教学目标：
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs:10:// 结合 trace 与 mmap/munmap，验证“地址合法性 + 只读页权限 + 解除映射后不可访问”。
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs-11-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs-12-#[unsafe(no_mangle)]
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs-13-extern "C" fn main() -> i32 {
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs-25-    assert_eq!(None, trace_read(0x80200000 as *const _)); // 内核地址
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs-26-    assert_eq!(-1, trace_write(0x80200000 as *const _, 0));
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs-27-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs:28:    // 测试 mmap 只读页
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs-29-    let start: usize = 0x10000000;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs-30-    let len: usize = 4096;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs-31-    let prot: usize = 1; // READONLY
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs-32-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs:33:    assert_eq!(0, mmap(start, len, prot));
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs-34-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs-35-    assert!(trace_read(start as *const u8).is_some()); // 可读
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_trace.rs-36-    assert_eq!(-1, trace_write(start as *const u8, 0)); // 不可写
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap.rs-4-#[macro_use]
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap.rs-5-extern crate user_lib;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap.rs-6-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap.rs:7:use user_lib::mmap;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap.rs-8-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap.rs-9-// 教学目标：
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap.rs:10:// 验证最基本的 mmap 成功后可读可写语义。
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap.rs-11-
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap.rs-12-#[unsafe(no_mangle)]
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap.rs-13-extern "C" fn main() -> i32 {
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap.rs-14-    let start: usize = 0x10000000;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap.rs-15-    let len: usize = 4096;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap.rs-16-    let prot: usize = 3;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap.rs:17:    assert_eq!(0, mmap(start, len, prot));
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap.rs-18-    for i in start..(start + len) {
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap.rs-19-        let addr: *mut u8 = i as *mut u8;
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch4_mmap.rs-20-        unsafe {
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch5_usertest.rs-16-    "07write_c",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch5_usertest.rs-17-    "ch3_sleep",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch5_usertest.rs-18-    "ch3_sleep1",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch5_usertest.rs:19:    "ch4_mmap",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch5_usertest.rs:20:    "ch4_mmap1",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch5_usertest.rs:21:    "ch4_mmap2",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch5_usertest.rs:22:    "ch4_mmap3",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch5_usertest.rs-23-    "ch4_unmap",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch5_usertest.rs-24-    "ch4_unmap2",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch5_usertest.rs-25-    "ch5_spawn0",
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch7b_usertest.rs-15-    "fork_exit",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch7b_usertest.rs-16-    "forktest_simple",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch7b_usertest.rs-17-    "12forktest",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch7b_usertest.rs:18:    "sbrk",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch7b_usertest.rs-19-    "filetest_simple",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch7b_usertest.rs-20-    "cat_filea",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch7b_usertest.rs-21-    "sig_simple",
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6_usertest.rs-16-    "07write_c",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6_usertest.rs-17-    "ch3_sleep",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6_usertest.rs-18-    "ch3_sleep1",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6_usertest.rs:19:    "ch4_mmap",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6_usertest.rs:20:    "ch4_mmap1",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6_usertest.rs:21:    "ch4_mmap2",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6_usertest.rs:22:    "ch4_mmap3",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6_usertest.rs-23-    "ch4_unmap",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6_usertest.rs-24-    "ch4_unmap2",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6_usertest.rs-25-    "ch5_spawn0",
+--
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6_usertest.rs-28-    "14forktest2",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6_usertest.rs-29-    "fork_exit",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6_usertest.rs-30-    "forktest_simple",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6_usertest.rs:31:    "sbrk",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6_usertest.rs-32-    "filetest_simple",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6_usertest.rs-33-    "ch6_file0",
+/mnt/d/Code/homework/OS/tg-rcore-tutorial/tg-rcore-tutorial-user/src/bin/ch6_usertest.rs-34-    "ch6_file1",
