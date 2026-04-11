@@ -1,0 +1,96 @@
+[package]
+name = "user"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "hello"
+path = "src/bin/hello.rs"
+
+[[bin]]
+name = "fork_test"
+path = "src/bin/fork_test.rs"
+
+[[bin]]
+name = "thread_test"
+path = "src/bin/thread_test.rs"
+
+[[bin]]
+name = "spin_task"
+path = "src/bin/spin_task.rs"
+
+[[bin]]
+name = "yield_test"
+path = "src/bin/yield_test.rs"
+
+[[bin]]
+name = "shell"
+path = "src/bin/shell.rs"
+
+[[bin]]
+name = "multicore_test"
+path = "src/bin/multicore_test.rs"
+
+[[bin]]
+name = "test_timer_interrupt"
+path = "src/bin/test_timer_interrupt.rs"
+
+[[bin]]
+name = "test_preemption"
+path = "src/bin/test_preemption.rs"
+
+[[bin]]
+name = "test_multicore_online"
+path = "src/bin/test_multicore_online.rs"
+
+[[bin]]
+name = "test_concurrent_fork"
+path = "src/bin/test_concurrent_fork.rs"
+
+[[bin]]
+name = "test_hart_balance"
+path = "src/bin/test_hart_balance.rs"
+
+[[bin]]
+name = "test_work_stealing"
+path = "src/bin/test_work_stealing.rs"
+
+[[bin]]
+name = "test_perf_throughput"
+path = "src/bin/test_perf_throughput.rs"
+
+[[bin]]
+name = "test_perf_contention"
+path = "src/bin/test_perf_contention.rs"
+
+[[bin]]
+name = "test_perf_mixed"
+path = "src/bin/test_perf_mixed.rs"
+
+[[bin]]
+name = "test_perf_kernel_irq"
+path = "src/bin/test_perf_kernel_irq.rs"
+
+[[bin]]
+name = "test_perf_single_vs_multi"
+path = "src/bin/test_perf_single_vs_multi.rs"
+
+[[bin]]
+name = "test_perf_single_vs_multi_thread"
+path = "src/bin/test_perf_single_vs_multi_thread.rs"
+
+[[bin]]
+name = "test_perf_stdio_concurrent"
+path = "src/bin/test_perf_stdio_concurrent.rs"
+
+[[bin]]
+name = "test_perf_fs_workload"
+path = "src/bin/test_perf_fs_workload.rs"
+
+[[bin]]
+name = "test_signal_basic"
+path = "src/bin/test_signal_basic.rs"
+
+[[bin]]
+name = "test_suite"
+path = "src/bin/test_suite.rs"

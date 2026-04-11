@@ -1,0 +1,16 @@
+[package]
+name = "kernel"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+riscv = "0.11"
+sbi-rt = { version = "0.0.3", features = ["legacy"] }
+buddy_system_allocator = "0.9"
+bitflags = "2.0"
+log = "0.4"
+lazy_static = { version = "1.4", features = ["spin_no_std"] }
+xmas-elf = "0.9"
+
+[profile.release]
+debug = true
